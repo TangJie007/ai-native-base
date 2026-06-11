@@ -1,5 +1,5 @@
 ---
-name: prd-to-spec
+name: wetspec
 description: >
   This skill should be used when the user wants to parse a PRD (Product Requirements Document)
   into structured Spec files, or when a PRD has been updated and the corresponding Spec files
