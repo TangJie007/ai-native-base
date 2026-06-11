@@ -21,7 +21,7 @@ const PRESETS = {
     framework: 'node:test',
     path: 'src/**/__tests__/**/*.test.js',
     command: 'npm run test:unit',
-    testUnitScript: 'node --test src/**/__tests__/*.test.js',
+    testUnitScript: 'node --test src/**/__tests__/**/*.test.js',
     testScript: 'npm run test:unit',
     devDependencies: {},
     installHint: '无需额外依赖（Node 18+ 内置 node:test）',
@@ -162,7 +162,7 @@ function cmdDetect({ projectRoot, asJson }) {
       preset: recommendation.preset,
     },
     options,
-    acNote: 'AC 验收仍由 wetspec verify 使用 node --test，与用户选的单元测试框架无关（Node 项目）',
+    acNote: '验收由 wetspec verify 按 describe(LOG-xxx/AC-xxx) 跑单元测试；非 node:test 时整包执行 unit_test.command',
   };
 
   if (asJson) {
@@ -173,7 +173,7 @@ function cmdDetect({ projectRoot, asJson }) {
   console.log(`\n🧪 单元测试框架检测: ${projectRoot}\n`);
   console.log(`   信号: ${signals.join(', ') || '无'}`);
   console.log(`   推荐: ${recommendation.id} — ${recommendation.reason}`);
-  console.log(`   AC 层: wetspec verify 固定 node --test（tests/<feature_id>/ac-*.test.js）\n`);
+  console.log(`   验收: wetspec verify 按 LOG-xxx/AC-xxx 嵌套 describe 跑单元测试\n`);
   for (const opt of options) {
     const mark = opt.id === recommendation.id ? '★' : ' ';
     console.log(`   ${mark} ${opt.id}: ${opt.preset.command}`);
@@ -255,7 +255,7 @@ function cmdConfigure({ specDir, projectRoot, framework, install, asJson }) {
       command: preset.command,
       configured_at: now,
       ac_runner: 'node:test',
-      ac_note: 'AC 验收 tests/<feature_id>/ac-*.test.js 仍由 wetspec verify 以 node --test 执行',
+      ac_note: 'wetspec verify 按 describe(LOG-xxx)→describe(AC-xxx) 跑单元测试，结果写回 Spec YAML',
     };
   }
 

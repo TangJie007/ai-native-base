@@ -7,7 +7,7 @@
 
 - [ ] 1. <!-- 读取 design.md 配置项，更新 config -->
 - [ ] 2. <!-- 实现核心业务逻辑 -->
-- [ ] 3. <!-- 为 test_method: auto/both 的 AC 编写 tests/<feature_id>/ac-*.test.js -->
+- [ ] 3. <!-- 在 src/<module-slug>/__tests__/ 为 auto AC 编写 describe(LOG-xxx)→describe(AC-xxx) 测试 -->
 - [ ] 4. <!-- 在 src/<module-slug>/__tests__/ 补充单元测试，运行 unit_test.command -->
 - [ ] 5. <!-- 运行 /wetspec-verify -->
 

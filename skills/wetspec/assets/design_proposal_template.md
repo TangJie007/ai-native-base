@@ -20,5 +20,5 @@
 
 - **Spec**：`specs/<模块>/<功能>_spec.yaml`
 - **配置**：<!-- 环境变量 / 常量 -->
-- **测试**：`tests/<feature_id>/`
+- **测试**：`src/<module-slug>/__tests__/`（LOG/AC 嵌套 describe）
 - **风险**：<!-- 兼容性、回滚 -->

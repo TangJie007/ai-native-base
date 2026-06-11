@@ -74,7 +74,7 @@ const TRANSITIONS = {
   'design-complete': { from: ['design'], to: 'done', requires: ['design_doc'] },
   'start-build': { from: ['done', 'verify'], to: 'build', requires: [] },
   'build-complete': { from: ['build'], to: 'verify', requires: ['build_target'] },
-  'verify-pass': { from: ['verify'], to: 'done', requires: ['verification_report'] },
+  'verify-pass': { from: ['verify'], to: 'done', requires: ['verify_result'] },
   'verify-fail': { from: ['verify'], to: 'build', requires: [] },
   'archive': { from: ['done'], to: 'archive', requires: [] },
   'archive-complete': { from: ['archive'], to: 'done', requires: [] },

@@ -81,7 +81,7 @@ wetspec py-install --check
 wetspec unit-test detect --root . --json
 ```
 
-根据 `recommendation` 展示推荐及理由。说明：**AC 验收**仍由 `wetspec verify` 以 `node --test` 跑 `tests/<feature_id>/ac-*.test.js`，与用户选的**单元测试**框架无关（Node 项目）。
+根据 `recommendation` 展示推荐及理由。说明：**验收与单元测试同一套**：`wetspec verify` 在 `src/**/__tests__/` 按 `describe(LOG-xxx)→describe(AC-xxx)` 逐条跑（`node:test`）；非 `node:test` 时整包执行 `unit_test.command`。
 
 **AskQuestion 选项**（`label` 须含括号说明；推荐项放第一）：
 

@@ -96,7 +96,7 @@ wetspec doctor specs/
 | `state` | `.wetspec.yaml` 状态机 |
 | `doctor` | 健康诊断（含 unit_test 配置检查） |
 | `unit-test` | 单元测试框架 detect / configure（DP-0） |
-| `verify` | AC 自动验收 |
+| `verify` | 按 LOG/AC 嵌套 describe 跑单元测试，结果写回 Spec YAML |
 | `change` | delta 隔离 |
 | `archive` | delta → 主 specs |
 | `preflight` | 多人预检 |

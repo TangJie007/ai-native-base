@@ -39,7 +39,7 @@ specs/.wetspec.yaml                        # 主库状态
 | `design_doc` | string | 技术设计路径，通常 `<changes_root>/<name>/design.md` |
 | `build_target` | string | 当前实现的 Spec 相对路径 |
 | `verify_result` | string | 验收结果：`pending` `pass` `fail` |
-| `verification_report` | string | 验收报告 JSON 路径 |
+| `verification_report` | string \| null | **已废弃**，保留兼容；验收结果写入各 Spec YAML |
 | `unit_test` | object \| null | 单元测试基建（DP-0 配置）；见下表 |
 | `unit_test.framework` | string \| null | `node:test` `vitest` `jest` `pytest` |
 | `unit_test.deferred` | boolean | 是否暂缓选定（`true` 时 build 前须再配置） |
@@ -48,12 +48,11 @@ specs/.wetspec.yaml                        # 主库状态
 | `unit_test.configured_at` | string | 配置日期 ISO `YYYY-MM-DD` |
 | `unit_test.ac_runner` | string | AC 层 runner 说明，固定 `node:test`（Node 项目） |
 
-**两层测试**：
+**单层测试**（实现 + 验收）：
 
-| 层级 | 路径 | 执行方式 |
-|------|------|----------|
-| AC 验收 | `tests/<feature_id>/ac-*.test.js` | `wetspec verify` → `node --test` |
-| 单元测试 | `src/<module-slug>/__tests__/`（或 `unit_test.path`） | `unit_test.command` |
+| 路径 | build | verify |
+|------|-------|--------|
+| `src/<module-slug>/__tests__/`（或 `unit_test.path`） | `unit_test.command` | `wetspec verify` 按 LOG/AC describe 嵌套逐条跑 |
 
 ## 阶段转换（Guard）
 
@@ -72,7 +71,7 @@ specs/.wetspec.yaml                        # 主库状态
 | `design-complete` | design | done | design_doc |
 | `start-build` | done, verify | build | — |
 | `build-complete` | build | verify | build_target |
-| `verify-pass` | verify | done | verification_report |
+| `verify-pass` | verify | done | verify_result |
 | `verify-fail` | verify | build | — |
 
 失败时输出 `[HARD STOP]`，Agent 不得跳过。

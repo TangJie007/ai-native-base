@@ -1,68 +1,75 @@
 #!/usr/bin/env node
 /**
- * wetspec_verify.js — 按 Spec 验收标准验收实现
- * 用法:
- *   node wetspec_verify.js <spec_yaml> [--root <project_root>] [--json] [--report <path>]
+ * wetspec_verify.js — 按 Spec 验收标准运行单元测试，结果写回 Spec YAML
  *
- * 约定：
- *   - 自动验收测试位于 tests/<feature_id>/ac-<ac-id>.test.js（小写 AC 编号）
- *   - test_method 为 auto/both 的 AC 必须存在对应测试文件或通过 --test 命令
- *   - test_method 为 manual 的 AC 输出人工验收清单
+ * 用法:
+ *   node wetspec_verify.js <spec_yaml> [--root <project_root>] [--json] [--no-write]
+ *
+ * 约定（node:test）：
+ *   - 单元测试位于 specs/.wetspec.yaml 的 unit_test.path（默认 src 下 __tests__ 目录）
+ *   - 每个 auto/both AC 须在测试中嵌套：describe('<feature_id>') → describe('AC-001: ...')
+ *   - verify 以 --test-name-pattern "<feature_id> AC-001" 逐条验收
+ *   - test_method: manual 的 AC 标为 manual，不跑测试
  */
 
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
-const { loadYamlFile, getFeatureId, getFeatureName, getModuleName } = require('./lib/spec_utils');
+const {
+  yaml,
+  loadYamlFile,
+  getFeatureId,
+  getFeatureName,
+  getModuleName,
+} = require('./lib/spec_utils');
+const { expandTestGlob, findSpecDir } = require('./lib/test_glob');
 
 function parseArgs(argv) {
   const specYaml = argv[0];
   if (!specYaml || specYaml === '--help') {
     console.log(`
 用法:
-  node wetspec_verify.js <spec_yaml> [--root <project_root>] [--json] [--report <path>]
+  node wetspec_verify.js <spec_yaml> [--root <project_root>] [--json] [--no-write]
 
 示例:
   node wetspec_verify.js specs/用户登录/手机号+验证码登录_spec.yaml --root .
+
+约定:
+  单元测试 describe 嵌套: describe('LOG-001') → describe('AC-001: ...')
+  验收结果写入 acceptance_criteria[].verify_status / verified_at（不生成 reports/）
 `);
     process.exit(specYaml === '--help' ? 0 : 1);
   }
   const rootIdx = argv.indexOf('--root');
-  const reportIdx = argv.indexOf('--report');
   return {
     specYaml: path.resolve(specYaml),
     projectRoot: path.resolve(rootIdx >= 0 ? argv[rootIdx + 1] : process.cwd()),
     asJson: argv.includes('--json'),
-    reportPath: reportIdx >= 0 ? path.resolve(argv[reportIdx + 1]) : null,
+    writeBack: !argv.includes('--no-write'),
   };
 }
 
 function normalizeTestMethod(method) {
   const m = (method || 'manual').toLowerCase();
-  if (m === 'both') return 'both';
+  if (m === 'both') return 'auto';
   if (m === 'auto' || m === 'automatic') return 'auto';
   return 'manual';
 }
 
-function acTestPath(projectRoot, featureId, acId) {
-  const acSlug = acId.toLowerCase();
-  return path.join(projectRoot, 'tests', featureId, `${acSlug}.test.js`);
-}
-
-function runTestFile(testPath) {
-  try {
-    execSync(`node --test "${testPath}"`, {
-      encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 30000,
-    });
-    return { ok: true, output: '' };
-  } catch (e) {
-    return {
-      ok: false,
-      output: [e.stdout, e.stderr].filter(Boolean).join('\n').trim() || e.message,
-    };
+function loadUnitTestConfig(specYaml) {
+  const specDir = findSpecDir(specYaml);
+  const statePath = path.join(specDir, '.wetspec.yaml');
+  if (!fs.existsSync(statePath)) {
+    return { specDir, framework: 'node:test', path: 'src/**/__tests__/**/*.test.js', command: null };
   }
+  const state = yaml.load(fs.readFileSync(statePath, 'utf8'));
+  const ut = state.unit_test || {};
+  return {
+    specDir,
+    framework: ut.framework || 'node:test',
+    path: ut.path || 'src/**/__tests__/**/*.test.js',
+    command: ut.command || null,
+  };
 }
 
 function collectAcceptanceCriteria(specData) {
@@ -97,7 +104,97 @@ function collectAcceptanceCriteria(specData) {
   return items;
 }
 
-function verifySpec({ specYaml, projectRoot, asJson, reportPath }) {
+function hasAcTestInSource(source, featureId, acId) {
+  const featureRe = new RegExp(`describe\\s*\\(\\s*['\`]${featureId}['\`]`);
+  const acRe = new RegExp(`describe\\s*\\(\\s*['\`]${acId}([^'\`]*)['\`]`, 'i');
+  return featureRe.test(source) && acRe.test(source);
+}
+
+function findFilesWithAc(testFiles, featureId, acId) {
+  return testFiles.filter(file => {
+    const source = fs.readFileSync(file, 'utf8');
+    return hasAcTestInSource(source, featureId, acId);
+  });
+}
+
+function runNodeTestForAc(testFiles, featureId, acId, projectRoot) {
+  const pattern = `${featureId} ${acId}`;
+  const matched = findFilesWithAc(testFiles, featureId, acId);
+  if (!matched.length) {
+    return {
+      ok: false,
+      output: `缺少单元测试: describe('${featureId}') → describe('${acId}: ...')`,
+      test_files: [],
+    };
+  }
+
+  const filesArg = matched.map(f => `"${f}"`).join(' ');
+  try {
+    execSync(`node --test --test-name-pattern "${pattern}" ${filesArg}`, {
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 60000,
+      cwd: projectRoot,
+    });
+    return {
+      ok: true,
+      output: '',
+      test_files: matched.map(f => path.relative(projectRoot, f)),
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      output: [e.stdout, e.stderr].filter(Boolean).join('\n').trim() || e.message,
+      test_files: matched.map(f => path.relative(projectRoot, f)),
+    };
+  }
+}
+
+function runFullUnitCommand(projectRoot, command) {
+  try {
+    execSync(command, {
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 120000,
+      cwd: projectRoot,
+      shell: true,
+    });
+    return { ok: true, output: '' };
+  } catch (e) {
+    return {
+      ok: false,
+      output: [e.stdout, e.stderr].filter(Boolean).join('\n').trim() || e.message,
+    };
+  }
+}
+
+function saveSpecYaml(specYaml, data) {
+  const content = yaml.dump(data, { lineWidth: 120, noRefs: true });
+  fs.writeFileSync(specYaml, content, 'utf8');
+}
+
+function applyResultsToSpec(specData, results, verifyResult) {
+  const now = new Date().toISOString();
+  const today = now.slice(0, 10);
+  const byId = Object.fromEntries(results.map(r => [r.id, r]));
+
+  if (Array.isArray(specData.acceptance_criteria)) {
+    for (const ac of specData.acceptance_criteria) {
+      const r = byId[ac.id];
+      if (!r) continue;
+      ac.verify_status = r.status;
+      ac.verified_at = r.status === 'manual' ? null : now;
+      ac.verify_reason = r.status === 'pass' ? null : (r.reason || null);
+    }
+  }
+
+  if (specData.metadata) {
+    specData.metadata.updated_at = today;
+    if (verifyResult === 'pass') specData.metadata.status = 'implemented';
+  }
+}
+
+function verifySpec({ specYaml, projectRoot, asJson, writeBack }) {
   if (!fs.existsSync(specYaml)) {
     console.error(`❌ Spec 文件不存在: ${specYaml}`);
     process.exit(1);
@@ -113,50 +210,63 @@ function verifySpec({ specYaml, projectRoot, asJson, reportPath }) {
     process.exit(1);
   }
 
+  const unitCfg = loadUnitTestConfig(specYaml);
+  const testFiles = expandTestGlob(projectRoot, unitCfg.path);
   const acceptance = collectAcceptanceCriteria(specData);
   const results = [];
+  const usePerAc = unitCfg.framework === 'node:test';
 
-  for (const ac of acceptance) {
-    const testPath = acTestPath(projectRoot, featureId, ac.id);
-    const needsAuto = ac.test_method === 'auto' || ac.test_method === 'both';
-    const hasTest = fs.existsSync(testPath);
-
-    if (needsAuto && !hasTest) {
-      results.push({
-        id: ac.id,
-        description: ac.description,
-        expected_result: ac.expected_result,
-        test_method: ac.test_method,
-        status: 'fail',
-        reason: `缺少自动测试: ${path.relative(projectRoot, testPath)}`,
-        test_file: path.relative(projectRoot, testPath),
-      });
-      continue;
+  if (!usePerAc && unitCfg.command) {
+    const full = runFullUnitCommand(projectRoot, unitCfg.command);
+    for (const ac of acceptance) {
+      if (ac.test_method === 'manual') {
+        results.push({
+          id: ac.id,
+          description: ac.description,
+          expected_result: ac.expected_result,
+          test_method: ac.test_method,
+          status: 'manual',
+          reason: '需人工验收',
+          test_files: [],
+        });
+      } else {
+        results.push({
+          id: ac.id,
+          description: ac.description,
+          expected_result: ac.expected_result,
+          test_method: ac.test_method,
+          status: full.ok ? 'pass' : 'fail',
+          reason: full.ok ? '单元测试通过' : full.output,
+          test_files: [],
+        });
+      }
     }
+  } else {
+    for (const ac of acceptance) {
+      if (ac.test_method === 'manual') {
+        results.push({
+          id: ac.id,
+          description: ac.description,
+          expected_result: ac.expected_result,
+          test_method: ac.test_method,
+          status: 'manual',
+          reason: '需人工验收',
+          test_files: [],
+        });
+        continue;
+      }
 
-    if (needsAuto && hasTest) {
-      const run = runTestFile(testPath);
+      const run = runNodeTestForAc(testFiles, featureId, ac.id, projectRoot);
       results.push({
         id: ac.id,
         description: ac.description,
         expected_result: ac.expected_result,
         test_method: ac.test_method,
         status: run.ok ? 'pass' : 'fail',
-        reason: run.ok ? '自动测试通过' : run.output,
-        test_file: path.relative(projectRoot, testPath),
+        reason: run.ok ? '单元测试通过' : run.output,
+        test_files: run.test_files,
       });
-      continue;
     }
-
-    results.push({
-      id: ac.id,
-      description: ac.description,
-      expected_result: ac.expected_result,
-      test_method: ac.test_method,
-      status: 'manual',
-      reason: '需人工验收',
-      test_file: null,
-    });
   }
 
   const autoItems = results.filter(r => r.test_method !== 'manual');
@@ -179,28 +289,30 @@ function verifySpec({ specYaml, projectRoot, asJson, reportPath }) {
       manual: manualCount,
     },
     acceptance: results,
+    written_to_yaml: false,
   };
 
-  if (reportPath) {
-    fs.mkdirSync(path.dirname(reportPath), { recursive: true });
-    fs.writeFileSync(reportPath, JSON.stringify(report, null, 2), 'utf8');
+  if (writeBack) {
+    applyResultsToSpec(specData, results, verifyResult);
+    saveSpecYaml(specYaml, specData);
+    report.written_to_yaml = true;
   }
 
   if (asJson) {
     console.log(JSON.stringify(report, null, 2));
   } else {
-    console.log(`\n=== wetspec 验收报告: ${featureName} (${featureId}) ===\n`);
+    console.log(`\n=== wetspec 验收: ${featureName} (${featureId}) ===\n`);
     for (const r of results) {
       const icon = r.status === 'pass' ? '✅' : r.status === 'fail' ? '❌' : '⏸️';
       console.log(`${icon} ${r.id} [${r.test_method}] ${r.description}`);
       console.log(`   预期: ${r.expected_result}`);
-      if (r.test_file) console.log(`   测试: ${r.test_file}`);
+      if (r.test_files?.length) console.log(`   测试: ${r.test_files.join(', ')}`);
       if (r.status !== 'pass') console.log(`   结果: ${r.reason}`);
       console.log('');
     }
     console.log(`汇总: 自动通过 ${autoPass}/${autoItems.length}，失败 ${autoFail}，待人工 ${manualCount}`);
     console.log(`验收结论: ${verifyResult.toUpperCase()}`);
-    if (reportPath) console.log(`报告已写入: ${reportPath}`);
+    if (writeBack) console.log(`结果已写入: ${path.relative(projectRoot, specYaml)}`);
   }
 
   process.exit(verifyResult === 'pass' ? 0 : 1);

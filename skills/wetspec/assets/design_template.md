@@ -27,17 +27,15 @@
 | 路径 | 职责 |
 |------|------|
 | `src/<module-slug>/` | 实现（英文路径，禁止中文） |
-| `src/<module-slug>/__tests__/` | 模块单元测试（框架见 `specs/.wetspec.yaml` → `unit_test`） |
-| `tests/<feature_id>/` | AC 自动验收（固定 `node:test`，由 `wetspec verify` 执行） |
+| `src/<module-slug>/__tests__/` | 单元测试 + AC 验收（`describe(LOG-xxx/AC-xxx)`） |
 
 ## 4.1 测试策略
 
-| 层级 | 框架 | 配置来源 |
+| 用途 | 框架 | 配置来源 |
 |------|------|----------|
-| 单元测试 | <!-- node:test / vitest / jest / pytest --> | `specs/.wetspec.yaml` → `unit_test.framework` |
-| AC 验收 | `node:test`（Node 项目） | SKILL 固定约定，不由 DP-0 改变 |
+| 实现 + 验收 | <!-- node:test / vitest / jest / pytest --> | `specs/.wetspec.yaml` → `unit_test` |
 
-build 完成后执行：`unit_test.command`（如 `npm run test:unit`）。
+build：`unit_test.command`；verify：`wetspec verify <spec.yaml> --root .`（写回 YAML）。
 
 ## 5. 配置与常量
 
@@ -51,9 +49,9 @@ build 完成后执行：`unit_test.command`（如 `npm run test:unit`）。
 
 ## 7. 验收映射
 
-| AC ID | 设计要点 | 测试文件 |
+| AC ID | 设计要点 | 测试嵌套 |
 |-------|----------|----------|
-| AC-001 | <!-- --> | `ac-001.test.js` |
+| AC-001 | <!-- --> | `describe('LOG-001')` → `describe('AC-001: ...')` |
 
 ## 8. 风险与回滚
 

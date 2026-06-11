@@ -31,7 +31,8 @@ acceptance_criteria:
   - id: "AC-001"
     description: ""          # 验收标准描述
     expected_result: ""     # 预期结果
-    test_method: ""         # 测试方法：manual | auto | both
+    test_method: auto       # manual | auto | both（both 视为 auto）
+    # verify_status / verified_at / verify_reason 由 wetspec verify 写入，解析时勿手写
 
 api_spec:
   endpoints:                # API 接口列表（可选）

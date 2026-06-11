@@ -65,8 +65,8 @@ wetspec — PRD→Spec 工作流 CLI（Agent 无关，Node 18+）
   doctor      健康诊断
               wetspec doctor <specs_dir>
 
-  verify      按 AC 验收
-              wetspec verify <spec.yaml> [--root .] [--report path.json]
+  verify      按 AC 跑单元测试，结果写回 Spec YAML
+              wetspec verify <spec.yaml> [--root .] [--no-write] [--json]
 
   change      Change delta 管理
               wetspec change init|set-manifest|validate-delta|list-delta ...

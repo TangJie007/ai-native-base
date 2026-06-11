@@ -7,7 +7,7 @@
 | PRD → Spec | wetspec | `specs/` YAML + MD |
 | 技术设计 | **wetspec** `/wetspec-design` | `proposal.md` `design.md` `tasks.md` |
 | 实现 | **wetspec** `/wetspec-build` | `src/` `tests/` |
-| 验收 | **wetspec** `/wetspec-verify` | `reports/*-verify.json` |
+| 验收 | **wetspec** `/wetspec-verify` | Spec YAML `verify_status` 字段 |
 
 Comet / OpenSpec **不是**运行时依赖；仅为 wetspec 设计状态机与工作流时的**参考借鉴**（见 `wetspec_state_schema.md` 附录）。
 
