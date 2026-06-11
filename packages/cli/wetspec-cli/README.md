@@ -95,7 +95,7 @@ wetspec doctor specs/
 | `indexes` | 重建 INDEX/README |
 | `state` | `.wetspec.yaml` 状态机 |
 | `doctor` | 健康诊断（含 unit_test 配置检查） |
-| `unit-test` | 单元测试框架 detect / configure（DP-0） |
+| `unit-test` | DP-0：detect（识别栈+推荐包）/ check（用户是否已装）/ await（暂停）/ configure（写配置，不装包） |
 | `verify` | 按 LOG/AC 嵌套 describe 跑单元测试，结果写回 Spec YAML |
 | `change` | delta 隔离 |
 | `archive` | delta → 主 specs |

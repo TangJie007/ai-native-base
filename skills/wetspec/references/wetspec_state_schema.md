@@ -24,7 +24,7 @@ specs/.wetspec.yaml                        # 主库状态
 | `change_name` | string | change 名称（仅 scope=change） |
 | `main_specs` | string | 主库相对路径（仅 scope=change），如 `specs/` |
 | `delta_dir` | string | delta 目录名，默认 `wetspec-delta` |
-| `phase` | string | 当前阶段：`idle` `parse` `update` `sync` `specs-ready` `design` `build` `verify` `archive` `done` |
+| `phase` | string | 当前阶段：`idle` `parse` `awaiting-unit-test` `update` `sync` `specs-ready` `design` `build` `verify` `archive` `done` |
 | `mode` | string | 同步模式：`incremental`（默认）或 `full` |
 | `prd.current` | string | 当前 PRD 文件名 |
 | `prd.previous` | string | 上一版 PRD 文件名 |
@@ -61,6 +61,8 @@ specs/.wetspec.yaml                        # 主库状态
 | Transition | 前置 phase | 目标 phase | 前置条件 |
 |------------|-----------|-----------|----------|
 | `start-parse` | idle, done | parse | — |
+| `await-unit-test` | parse | awaiting-unit-test | 用户选定 vitest/jest/pytest 且须自装依赖 |
+| `unit-test-ready` | awaiting-unit-test | parse | `unit-test check` 通过且已 configure |
 | `parse-complete` | parse | specs-ready | — |
 | `start-update` | idle, done | update | prd.current |
 | `update-complete` | update | specs-ready | last_diff |

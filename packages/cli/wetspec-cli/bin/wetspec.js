@@ -80,9 +80,11 @@ wetspec — PRD→Spec 工作流 CLI（Agent 无关，Node 18+）
   init        初始化 Spec 目录结构
               wetspec init <modules.json> <specs_dir> [version]
 
-  unit-test   单元测试框架检测与配置（项目首次 init 后 AskQuestion 使用）
+  unit-test   单元测试框架检测 / 就绪检查 / 配置（DP-0；用户自装，不代装）
               wetspec unit-test detect [--root .] [--json]
-              wetspec unit-test configure <specs_dir> --framework <id> [--root .] [--install]
+              wetspec unit-test check [--framework <id>] [--spec-dir specs/] [--json]
+              wetspec unit-test await <specs_dir> --framework <id> [--root .]
+              wetspec unit-test configure <specs_dir> --framework <id> [--root .]
 
   py-install  安装 / 检测 Python 插件依赖
               wetspec py-install [--check] [--user] [--quiet] [--json]

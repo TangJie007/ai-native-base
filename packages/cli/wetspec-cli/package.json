@@ -1,6 +1,6 @@
 {
   "name": "@wetspace/wetspec-cli",
-  "version": "1.1.0",
+  "version": "1.2.2",
   "description": "wetspec CLI — PRD→Spec 工作流（compare / change / archive / verify / doctor）",
   "license": "MIT",
   "publishConfig": {

@@ -14,7 +14,7 @@ const path = require('path');
 const { yaml } = require('./lib/spec_utils');
 
 const STATE_FILE = '.wetspec.yaml';
-const VALID_PHASES = ['idle', 'parse', 'update', 'sync', 'specs-ready', 'design', 'build', 'verify', 'archive', 'done'];
+const VALID_PHASES = ['idle', 'parse', 'awaiting-unit-test', 'update', 'sync', 'specs-ready', 'design', 'build', 'verify', 'archive', 'done'];
 const VALID_MODES = ['incremental', 'full'];
 
 const DEFAULT_STATE = {
@@ -64,6 +64,8 @@ function validateState(state) {
 
 const TRANSITIONS = {
   'start-parse': { from: ['idle', 'done'], to: 'parse', requires: [] },
+  'await-unit-test': { from: ['parse'], to: 'awaiting-unit-test', requires: [] },
+  'unit-test-ready': { from: ['awaiting-unit-test'], to: 'parse', requires: [] },
   'parse-complete': { from: ['parse'], to: 'specs-ready', requires: [] },
   'start-update': { from: ['idle', 'done'], to: 'update', requires: ['prd.current'] },
   'update-complete': { from: ['update'], to: 'specs-ready', requires: ['last_diff'] },

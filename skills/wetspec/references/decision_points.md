@@ -4,6 +4,37 @@
 > 不得用「建议下一步」、默认选项、历史偏好或纯文字列表代替。
 > 分析跑完 ≠ 工作流结束；**未 AskQuestion 视为违规**。
 
+## 禁止因端到端指令跳过决策点（HARD STOP）
+
+以下用户表述**只描述目标**，**不等于**已授权跳过任何决策点：
+
+| 用户说法（示例） | 错误理解 | 正确做法 |
+|-----------------|----------|----------|
+| 「完成需求」「一次性做完」「端到端跑完」 | 可静默串联 design → build → verify | 仍须在 **DP-1**、**DP-3** 等节点 **AskQuestion** |
+| 「/wetspec 完成需求」 | 等同用户选了「直接实现」 | 先 DP-1 展示 Spec 摘要并等待选择 |
+| 「继续」「按推荐做」 | 可代用户选第一项 | **禁止代选**；必须弹出选项让用户点选 |
+| 「不用问了，直接写代码」 | 可跳过 DP-3 | **禁止**；设计产物生成后仍须 DP-3 |
+
+**以下永远不能代替 AskQuestion**：
+
+- 用户意图推断（「他大概想直接 build」）
+- `auto_transition: true`（仅影响部分 `state check` 流转，**不豁免** DP）
+- 上一轮会话的选择（「上次选了设计」）
+- 任务看起来简单（「只有 5 个功能，改动小」）
+- 已在同一会话内生成过 `design.md`（生成 ≠ 确认）
+
+**违规判定**：若在未收到用户对**当前决策点**的 AskQuestion 选择前，执行了以下任一动作，视为**流程违规**：
+
+1. `wetspec state check --transition start-design` 或写入 `phase=design`
+2. 创建/写入 `proposal.md`、`design.md`、`tasks.md`
+3. `wetspec state check --transition start-build` 或写入 `phase=build`
+4. 创建/修改 `src/` 实现代码
+5. `wetspec verify` 并宣告「需求已完成」
+
+**唯一合法例外**：用户在**当前决策点**的 AskQuestion 中明确选择了对应选项（如 DP-1 选 `build`、DP-3 选 `confirm`）。未点选 = 未授权。
+
+**DP-3 专项**：`design.md` 写完后**会话不得结束**，**不得**紧接着写 `src/`。必须先展示设计摘要（架构、常量表、AC 映射），再 **AskQuestion DP-3**，等用户确认后才可 `start-build`。
+
 ## AskQuestion 选项文案规范
 
 每个选项的 `label` **必须**包含括号说明，格式：
@@ -81,25 +112,62 @@ wetspec py-install --check
 wetspec unit-test detect --root . --json
 ```
 
-根据 `recommendation` 展示推荐及理由。说明：**验收与单元测试同一套**：`wetspec verify` 在 `src/**/__tests__/` 按 `describe(LOG-xxx)→describe(AC-xxx)` 逐条跑（`node:test`）；非 `node:test` 时整包执行 `unit_test.command`。
+根据 `projectType`、`recommendation`、`installCommands` 展示推荐及理由。说明：**验收与单元测试同一套**：`node:test` 时 `wetspec verify` 按 `describe(LOG-xxx)→describe(AC-xxx)` 逐条跑；vitest/jest 时整包执行 `unit_test.command`。
+
+### check 宽松模式（兼容各种环境）
+
+| 类型 | 行为 |
+|------|------|
+| **推荐** | `detect`/`await` 仍按项目类型给出完整 `installCommands`（仅提示） |
+| **放行** | 已装**任一已知**单元测试框架（vitest/jest/mocha/jasmine/ava/karma/playwright 等）即放行；`node:test` 为 Node 18+；`pytest` 为 import pytest |
+| **推荐** | Webpack/Vue CLI/CRA → 建议 jest；Vite → 建议 vitest；**不绑定**构建工具，仅提示 |
+| **不卡死** | 框架与选择不一致、配套未装全 → **warnings**，不阻塞 |
+| **仍阻塞** | **完全没有任何**测试框架包；node:test 且 Node 低于 18 且无 npm 测试栈 |
+
+用户说「继续」时：`check` 退出 0 且有 `warnings` → 可 `configure`，须向用户展示警告。
+
+### 硬规则：禁止 Agent 替用户安装
+
+| 禁止 | 正确 |
+|------|------|
+| `configure --install` | **不得使用**（CLI 已废弃并警告） |
+| `npm install` / `pnpm add` | **不得执行**；只输出 `installCommands` 给用户 |
+| 选完框架后直接 configure（vitest/jest） | 须先 `await` + 等用户自装 + `check` 通过 |
 
 **AskQuestion 选项**（`label` 须含括号说明；推荐项放第一）：
 
 | id | label（含括号说明） | 动作 |
 |----|---------------------|------|
-| `node:test` | node:test（推荐纯 Node 模块：零依赖，Node 18+ 内置；写入 .wetspec.yaml 与 test:unit 脚本） | `configure --framework node:test` |
-| `vitest` | vitest（适合 Vite/前端；写入配置并添加 vitest devDependency） | `configure --framework vitest [--install]` |
-| `jest` | jest（适合 React/Next 等已有 Jest 项目；写入配置并添加 jest devDependency） | `configure --framework jest [--install]` |
-| `pytest` | pytest（Python 项目；仅写入 .wetspec.yaml，不修改 package.json） | `configure --framework pytest` |
-| `defer` | 暂缓选定（记录 deferred；build 前必须再跑 DP-0 或 configure） | `configure --framework defer` |
+| `node:test` | node:test（纯 Node 模块：零额外依赖；确认后可直接 configure） | `check` → `configure`（无需安装） |
+| `vitest` | vitest（Vue/React+Vite；须本机安装 vitest 等，装完说「继续」） | `await` → 提示安装 → **暂停** |
+| `jest` | jest（Next/Nest/React；须本机安装 jest 等，装完说「继续」） | `await` → 提示安装 → **暂停** |
+| `pytest` | pytest（Python；须 pip install pytest，装完说「继续」） | `await` → 提示安装 → **暂停** |
+| `defer` | 暂缓选定（记录 deferred；build 前必须再跑 DP-0） | `configure --framework defer` |
 
-用户选定后 **必须执行**：
+### 用户选定后的分支
+
+**A. `node:test`（无需额外包）**
 
 ```bash
-wetspec unit-test configure specs/ --framework <id> --root . [--install]
+wetspec unit-test check --framework node:test --spec-dir specs/ --root .
+wetspec unit-test configure specs/ --framework node:test --root .
 ```
 
-`vitest` / `jest` 用户确认安装依赖时加 `--install`。
+**B. `vitest` / `jest` / `pytest`（须用户自装）**
+
+```bash
+wetspec unit-test await specs/ --framework <id> --root .
+# 向用户展示 detect/await 输出的 installCommands，然后 HARD STOP
+# 用户在本机终端安装完成后回复「继续」
+wetspec unit-test check --framework <id> --spec-dir specs/ --root .
+# 退出 0 后才可：
+wetspec unit-test configure specs/ --framework <id> --root .
+wetspec state check specs/ --transition unit-test-ready   # 若 phase=awaiting-unit-test
+```
+
+**暂停态**：`phase: awaiting-unit-test`，`unit_test.pending_framework: <id>`。
+
+**恢复口令**：用户说「继续」「装好了」→ Agent 只跑 `check`，**禁止**再次 `npm install`。
 
 ---
 
@@ -195,5 +263,7 @@ wetspec state set specs/ --field phase --value specs-ready
 3. 当前 phase 是否应为 `specs-ready` / `design` / `verify`？
 4. 是否已调用 **AskQuestion**，且每个选项 label 含 **（）说明**？
 5. 是否擅自执行了 archive / design / build / py-install？
+6. 用户是否说了「完成需求 / 一次性做完」？若是，**是否仍执行了 DP-1 / DP-3**（说「完成」不能跳过）？
+7. 若刚写完 `design.md`，**是否停在 DP-3**，而非继续写 `src/`？
 
-任一为「否」→ 停止输出，先补齐 Guard 或 AskQuestion。
+任一为「否」→ 停止输出，先补齐 Guard 或 AskQuestion。**不得**用「已完成实现」类总结掩盖跳过的决策点。

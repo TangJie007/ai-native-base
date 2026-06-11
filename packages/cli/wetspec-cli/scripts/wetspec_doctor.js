@@ -69,8 +69,18 @@ function main() {
 
     try {
       const state = yaml.load(fs.readFileSync(statePath, 'utf8'));
+      if (state.phase === 'awaiting-unit-test') {
+        const pending = state.unit_test?.pending_framework || '未知';
+        checks.push({
+          name: 'unit_test_awaiting',
+          ok: false,
+          message: `等待用户安装单元测试依赖（pending: ${pending}）；安装后运行 unit-test check → configure`,
+          severity: 'warn',
+        });
+      }
+
       const ut = state.unit_test;
-      if (!ut || (!ut.framework && !ut.deferred)) {
+      if (!ut || (!ut.framework && !ut.deferred && !ut.pending_framework)) {
         checks.push({
           name: 'unit_test_configured',
           ok: false,

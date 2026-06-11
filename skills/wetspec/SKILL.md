@@ -189,11 +189,13 @@ wetspec py-install --check
 ```
 parse / update / sync
         ↓
-   specs-ready  ──[AskQuestion 阻塞]──→  /wetspec-design  →  design  →  done
-        │                                                    │
-        └──────── skip-design ───────────────────────────────┘
-                                                              │
-                                                    /wetspec-build
+   specs-ready  ──[DP-1 AskQuestion 阻塞]──→  /wetspec-design
+        │                                              ↓
+        │                                         design（写 proposal/design/tasks）
+        │                                              ↓
+        │                                    [DP-3 AskQuestion 阻塞]  ← 不可跳过
+        │                                              ↓
+        └──────── skip-design / build ──────────→  /wetspec-build
                                                               ↓
                                                     build → verify → done
 ```
@@ -204,6 +206,7 @@ parse / update / sync
 - 遇到决策点，**必须使用 AskQuestion 工具暂停并等待用户明确选择**；不得用默认推荐、历史偏好或纯文字提示代替。
 - 用户选择「进入设计」后，执行 `/wetspec-design`（`start-design`）；选择「暂不设计」则 `skip-design` → `done`。
 - 若 `auto_transition: false`，完成 Spec 后只提示 `/wetspec-design` 或 `/wetspec-build`，不自动跳转。
+- **禁止因端到端指令跳过决策点**：用户说「完成需求」「一次性做完」「/wetspec 完成需求」等，**只表示目标**，**不代替** DP-1 / DP-3 的 AskQuestion。详见 [decision_points.md §禁止因端到端指令跳过](references/decision_points.md#禁止因端到端指令跳过决策点hard-stop)。
 
 **阻塞决策点**（到达时必须 AskQuestion，详见 `references/decision_points.md`）：
 
@@ -224,8 +227,11 @@ parse / update / sync
 | Agent 想法 | 实际风险 |
 |-----------|---------|
 | "用户大概想直接设计" | 不能替用户决定 — 必须 AskQuestion |
+| "用户说完成需求，我帮他全跑完" | **严禁** — 仍须 DP-1 →（若进设计）DP-3，见 decision_points §端到端 |
+| "design.md 写完了，顺手把代码也写了" | **严禁** — DP-3 未确认前不得写 `src/` |
 | "改动很小，不用问" | 决策点无大小例外 |
 | "上次选了设计，这次也选" | 历史偏好不能代替当前确认 |
+| "auto_transition 是 true，可以自动往下走" | `auto_transition` **不豁免** AskQuestion |
 
 ---
 
@@ -289,10 +295,17 @@ wetspec unit-test detect --root . --json
 
 2. **必须用 AskQuestion**（推荐项放第一；选项含括号说明，见 [DP-0](references/decision_points.md#dp-0单元测试框架项目首次初始化)）。
 
-3. 用户选定后写入配置（`vitest`/`jest` 需装依赖时加 `--install`）：
+3. 用户选定后：
+
+- **`node:test`**：`check` 通过 → `configure`（无需安装）
+- **`vitest` / `jest` / `pytest`**：`await` → 展示 `installCommands` → **硬停**（`phase=awaiting-unit-test`）→ 用户本机安装 → 用户说「继续」→ `check` 通过 → `configure`
+- **禁止** Agent 执行 `npm install` / `pnpm add` / `configure --install`
 
 ```bash
-wetspec unit-test configure specs/ --framework <id> --root . [--install]
+wetspec unit-test detect --root . --json
+wetspec unit-test await specs/ --framework <id> --root .    # 需安装的框架
+wetspec unit-test check --framework <id> --spec-dir specs/ --root .
+wetspec unit-test configure specs/ --framework <id> --root .
 ```
 
 **单层测试说明**（须在 AskQuestion 前告知用户）：
@@ -341,7 +354,7 @@ wetspec state set specs/ --field phase --value specs-ready
 | 先 review / 修改 Spec（人工改 YAML/MD 后重新 validate，不执行写库或写代码） | 保持 `specs-ready` |
 | 跳过设计，直接实现（Spec 已够清晰，立即写 src 与 AC 测试） | `/wetspec-build` |
 
-**不得**跳过此步骤直接结束。
+**不得**跳过此步骤直接结束。即使用户表述为「完成需求」「一次性做完」，也**必须先**完成本步 AskQuestion；「完成需求」不是已选「直接实现」的授权，只有用户在本步点选 `build` 选项才算。
 
 ---
 
@@ -575,7 +588,11 @@ wetspec change init <changes_root>/<name> \
 
 `design.md` 必须包含：**配置常量表**、**AC→测试映射**，供 `/wetspec-build` 直接引用。
 
-生成后 **AskQuestion 确认**：
+生成后 **必须 AskQuestion 确认（DP-3，阻塞）**：
+
+> **硬停**：`proposal.md` / `design.md` / `tasks.md` 落盘后 **禁止** 同轮会话内继续写 `src/` 或执行 `start-build`。
+> 须先展示设计摘要，调用 AskQuestion，**等待用户点选** 后再进入 build。
+> 用户说「完成需求」**不能**代替本步确认。
 
 | 选项 label（含括号） | 动作 |
 |----------------------|------|
@@ -789,8 +806,10 @@ python node_modules/@wetspace/wetspec-cli/scripts/py/map_affected.py --diff diff
 | `wetspec archive <change> [--dry-run]` | delta → 主 specs |
 | `wetspec verify <spec_yaml> --root .` | 按 AC 验收实现 |
 | `wetspec doctor specs/` | 健康诊断（含 unit_test 是否已配置） |
-| `wetspec unit-test detect [--root .]` | 检测并推荐单元测试框架（DP-0） |
-| `wetspec unit-test configure specs/ --framework <id>` | 写入 unit_test + package.json 脚本 |
+| `wetspec unit-test detect [--root .]` | 识别项目类型，推荐框架与 installCommands（DP-0） |
+| `wetspec unit-test check [--framework <id>]` | 检查用户是否已安装依赖（退出 0=可继续） |
+| `wetspec unit-test await specs/ --framework <id>` | 暂停流程，等待用户自装 |
+| `wetspec unit-test configure specs/ --framework <id>` | 写入 unit_test + test:unit 脚本（须 check 通过） |
 | `wetspec sync-md specs/ --check` | 检查 MD 是否与 YAML 一致 |
 | `wetspec sync-md specs/` | 从 YAML 重新生成 MD |
 | `wetspec coverage PRD.md specs/` | PRD 功能是否都有 Spec |
@@ -874,6 +893,8 @@ Python 插件随 npm 包安装在 `node_modules/@wetspace/wetspec-cli/scripts/py
 - archive 前必须 `validate-delta`；非法文件会导致 archive 拒绝
 - 有活跃 change 时，**不要**两人直接改主 `specs/`，应各自 change → archive
 - Spec 生成后**不要**直接设 `phase=done`；必须经过 `specs-ready` 决策点
+- **禁止**因「完成需求 / 一次性做完」跳过 DP-1、DP-3；用户端到端意图 ≠ AskQuestion 已确认
+- `design.md` 生成后**必须**停 DP-3，**禁止**未确认就写 `src/`
 - 决策点必须用 **AskQuestion 工具**，纯文字提问不算完成
 - AskQuestion 每个选项 **label 必须含（）说明**，告知用户选该项的后果
 - `wetspec compare` Node 回退模式依赖标题级对比；**默认 Python 引擎**支持正文级 diff
@@ -882,6 +903,7 @@ Python 插件随 npm 包安装在 `node_modules/@wetspace/wetspec-cli/scripts/py
 - 修改 YAML 后务必运行 `wetspec sync-md`，否则 doctor 会报 MD 漂移
 - `wetspec init` 不覆盖已存在 Spec；全量重建需手动备份或删目录
 - 首次 init 后**必须**走 DP-0 配置 `unit_test`；`doctor` 会对未配置项告警
+- DP-0 **禁止** Agent `npm install`；vitest/jest 须 `await` → 用户自装 → 说「继续」→ `unit-test check`（宽松：任一主框架放行，配套仅警告）→ `configure`
 - `node:test` 项目：`wetspec verify` 按 LOG/AC 嵌套 describe 逐条验收；其他框架整包跑 `unit_test.command` 后粗粒度标记 AC
 - 只装 Skill 未装 CLI 时**必须 HARD STOP 并提示安装**，不得跳过 CLI Guard
 - Py 插件未就绪时**必须 AskQuestion（DP-0a）**，禁止擅自 `wetspec py-install`；用户选跳过则 compare/coverage 用 `--node-only`
