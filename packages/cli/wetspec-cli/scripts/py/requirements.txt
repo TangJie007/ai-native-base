@@ -1,0 +1,6 @@
+PyYAML>=6.0
+rapidfuzz>=3.0
+
+# P0 可选：PDF / Word 摄入（未安装时 prd_ingest 会降级提示）
+pymupdf>=1.23.0
+python-docx>=1.0.0

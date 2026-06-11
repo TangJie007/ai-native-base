@@ -1,0 +1,40 @@
+{
+  "name": "wetspec-cli",
+  "version": "1.0.0",
+  "description": "wetspec CLI — PRD→Spec 工作流（compare / change / archive / verify / doctor）",
+  "license": "MIT",
+  "bin": {
+    "wetspec": "./bin/wetspec.js"
+  },
+  "files": [
+    "bin",
+    "scripts"
+  ],
+  "scripts": {
+    "test": "node bin/wetspec.js --help",
+    "py:install": "node scripts/wetspec_py_install.js"
+  },
+  "dependencies": {
+    "diff": "^5.2.0",
+    "js-yaml": "^4.1.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "wetspec",
+    "prd",
+    "spec",
+    "cli",
+    "agent"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TangJie007/ai-native-base.git",
+    "directory": "wetspec-cli"
+  },
+  "homepage": "https://github.com/TangJie007/ai-native-base/tree/main/wetspec-cli#readme",
+  "bugs": {
+    "url": "https://github.com/TangJie007/ai-native-base/issues"
+  }
+}
