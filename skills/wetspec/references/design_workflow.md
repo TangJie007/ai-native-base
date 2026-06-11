@@ -11,7 +11,7 @@
 
 Comet / OpenSpec **不是**运行时依赖；仅为 wetspec 设计状态机与工作流时的**参考借鉴**（见 `wetspec_state_schema.md` 附录）。
 
-**分仓**：编排在本 Skill 仓库；命令执行依赖 npm 包 `wetspec-cli`（`npm install wetspec-cli` 或 `pnpm add wetspec-cli`）。Skill 不含 `scripts/`。
+**分仓**：编排在本 Skill 仓库；命令执行依赖 npm 包 `@wetspace/wetspec-cli`（`npm install @wetspace/wetspec-cli` 或 `pnpm add @wetspace/wetspec-cli`）。Skill 不含 `scripts/`。
 
 **CLI Guard**：每次工作流入口先检测 CLI；未安装则 HARD STOP 并提示用户安装，不得继续（见 `SKILL.md` 前置条件）。
 

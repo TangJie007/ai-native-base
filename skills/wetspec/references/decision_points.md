@@ -190,7 +190,7 @@ wetspec state set specs/ --field phase --value specs-ready
 
 在输出总结**之前**自问：
 
-1. 是否已做 **CLI Guard**（未装 wetspec-cli 时是否 HARD STOP 而非擅自 npm install）？
+1. 是否已做 **CLI Guard**（未装 `@wetspace/wetspec-cli` 时是否 HARD STOP 而非擅自 npm install）？
 2. 是否已做 **Py Guard**（`py-install --check` 失败时是否 **AskQuestion DP-0a**，而非擅自 `py-install`）？
 3. 当前 phase 是否应为 `specs-ready` / `design` / `verify`？
 4. 是否已调用 **AskQuestion**，且每个选项 label 含 **（）说明**？

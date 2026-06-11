@@ -1,8 +1,11 @@
 {
-  "name": "wetspec-cli",
+  "name": "@wetspace/wetspec-cli",
   "version": "1.0.0",
   "description": "wetspec CLI — PRD→Spec 工作流（compare / change / archive / verify / doctor）",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
     "wetspec": "./bin/wetspec.js"
   },

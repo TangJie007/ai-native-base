@@ -30,9 +30,9 @@ Comet 仅为编写本 skill 时的参考资料，不是运行时依赖。
 使用前必须在**业务项目**安装 CLI（npm 或 pnpm 均可）：
 
 ```bash
-npm install wetspec-cli
+npm install @wetspace/wetspec-cli
 # 或
-pnpm add wetspec-cli
+pnpm add @wetspace/wetspec-cli
 
 # 验证
 npx wetspec --help
@@ -48,7 +48,7 @@ npx skills add https://github.com/TangJie007/ai-native-base/tree/main/.agents/sk
 ```
 
 所有确定性命令调用 `wetspec <cmd>`，禁止硬编码 `node scripts/...` 或假设 skill 内含脚本。
-详见 skill 仓库 `README.md` 与 npm 包 `wetspec-cli` README。
+详见 skill 仓库 `README.md` 与 npm 包 `@wetspace/wetspec-cli` README。
 
 ### CLI 就绪检查（Guard，每次工作流入口必做）
 
@@ -56,9 +56,9 @@ npx skills add https://github.com/TangJie007/ai-native-base/tree/main/.agents/sk
 
 ```bash
 # 检测本地依赖（按项目包管理器二选一）
-npm ls wetspec-cli --depth=0
+npm ls @wetspace/wetspec-cli --depth=0
 # 或
-pnpm list wetspec-cli --depth=0
+pnpm list @wetspace/wetspec-cli --depth=0
 
 # 确认命令可用
 npx wetspec --help
@@ -78,13 +78,13 @@ pnpm exec wetspec --help
 **未安装时必须停止**，向用户输出（不要悄悄继续、不要假设已安装）：
 
 ```
-⚠️ 未检测到 wetspec-cli
+⚠️ 未检测到 @wetspace/wetspec-cli
 
 本 Skill 只提供工作流编排，命令行工具需单独安装。请先在本项目根目录执行：
 
-  npm install wetspec-cli
+  npm install @wetspace/wetspec-cli
   # 或（pnpm 项目）
-  pnpm add wetspec-cli
+  pnpm add @wetspace/wetspec-cli
 
 验证安装：
 
@@ -93,9 +93,9 @@ pnpm exec wetspec --help
   pnpm exec wetspec --help
 
 若项目尚无 package.json：
-  npm init -y && npm install wetspec-cli
+  npm init -y && npm install @wetspace/wetspec-cli
   # 或
-  pnpm init && pnpm add wetspec-cli
+  pnpm init && pnpm add @wetspace/wetspec-cli
 
 安装完成并确认 --help 正常后，请重新发起 wetspec 任务。
 ```
@@ -103,7 +103,7 @@ pnpm exec wetspec --help
 **禁止**在未安装时调用 `wetspec validate`、`wetspec compare` 等（必然失败）。
 **禁止**未经用户同意擅自执行 `npm install` / `pnpm add`；仅**提示**用户安装，由用户确认后再装。
 
-若用户已全局安装（`npm install -g wetspec-cli` 或 `pnpm add -g wetspec-cli`）且 `wetspec --help` 可用，可继续，但应建议项目在 `package.json` 中加入 `wetspec-cli` 依赖以便协作一致。
+若用户已全局安装（`npm install -g @wetspace/wetspec-cli` 或 `pnpm add -g @wetspace/wetspec-cli`）且 `wetspec --help` 可用，可继续，但应建议项目在 `package.json` 中加入 `@wetspace/wetspec-cli` 依赖以便协作一致。
 
 ### Python 插件就绪检查（Py Guard，CLI 通过后必做）
 
@@ -135,7 +135,7 @@ wetspec py-install --check
 
 - `validate` / `verify` / `sync-md` / `state` / `doctor` / `build` / `design`
 
-**混合引擎**：Node 主链 + Python 插件（路径 `node_modules/wetspec-cli/scripts/py/`）。`compare` / `coverage` 默认优先 Python，失败或无插件时回退 Node（`--node-only`）；`ingest` PDF/Word 无 Python 时不可用。
+**混合引擎**：Node 主链 + Python 插件（路径 `node_modules/@wetspace/wetspec-cli/scripts/py/`）。`compare` / `coverage` 默认优先 Python，失败或无插件时回退 Node（`--node-only`）；`ingest` PDF/Word 无 Python 时不可用。
 
 ## 能力全景（wetspec 自包含）
 
@@ -720,10 +720,10 @@ wetspec state set specs/ --field phase --value build
 
 ## wetspec-cli（独立 npm 包，与 Skill 分仓）
 
-CLI 发布为 npm 包 `wetspec-cli`，与 Skill 仓库分离。业务项目安装后任意终端 / CI / Agent 均可调用：
+CLI 发布为 npm 包 `@wetspace/wetspec-cli`，与 Skill 仓库分离。业务项目安装后任意终端 / CI / Agent 均可调用：
 
 ```bash
-npm install wetspec-cli   # 或 pnpm add wetspec-cli
+npm install @wetspace/wetspec-cli   # 或 pnpm add @wetspace/wetspec-cli
 wetspec --help
 
 wetspec compare PRD_old.md PRD_new.md --spec-dir specs/ -o diff.json
@@ -733,7 +733,7 @@ wetspec doctor specs/
 ```
 
 Skill 目录**无** `package.json`、**无** `scripts/`；所有命令走已安装的 `wetspec` CLI。
-详见 <https://github.com/TangJie007/ai-native-base/tree/main/wetspec-cli>（npm: `wetspec-cli`）。
+详见 <https://github.com/TangJie007/ai-native-base/tree/main/wetspec-cli>（npm: `@wetspace/wetspec-cli`）。
 
 > **编排**（AskQuestion、模板、工作流）在 Skill 仓库；**确定性逻辑**在 CLI npm 包。
 
@@ -770,14 +770,14 @@ wetspec ingest PRD.pdf --output PRD.md
 wetspec compare old.md new.md --spec-dir specs/ -o diff.json
 
 # P1: 单独补强 affected（路径随 npm 包）
-python node_modules/wetspec-cli/scripts/py/map_affected.py --diff diff.json --spec-dir specs/ -o diff.json
+python node_modules/@wetspace/wetspec-cli/scripts/py/map_affected.py --diff diff.json --spec-dir specs/ -o diff.json
 ```
 
 ---
 
 ## 日常维护命令
 
-均在**业务项目根**执行（已 `npm install wetspec-cli` 或 `pnpm add wetspec-cli` 后可用 `wetspec`）。
+均在**业务项目根**执行（已 `npm install @wetspace/wetspec-cli` 或 `pnpm add @wetspace/wetspec-cli` 后可用 `wetspec`）。
 
 | 命令 | 用途 |
 |------|------|
@@ -832,7 +832,7 @@ python node_modules/wetspec-cli/scripts/py/map_affected.py --diff diff.json --sp
 
 ### wetspec-cli（npm 包，脚本唯一维护位置）
 
-仓库：<https://github.com/TangJie007/ai-native-base/tree/main/wetspec-cli> · 安装：`npm install wetspec-cli` 或 `pnpm add wetspec-cli`
+仓库：<https://github.com/TangJie007/ai-native-base/tree/main/wetspec-cli> · 安装：`npm install @wetspace/wetspec-cli` 或 `pnpm add @wetspace/wetspec-cli`
 
 | CLI 命令 | 说明 |
 |----------|------|
@@ -853,7 +853,7 @@ python node_modules/wetspec-cli/scripts/py/map_affected.py --diff diff.json --sp
 | `wetspec preflight` | 多人预检 |
 | `wetspec ingest` | PRD 摄入 |
 
-Python 插件随 npm 包安装在 `node_modules/wetspec-cli/scripts/py/`。Skill 仓库**不包含** `scripts/` 副本。
+Python 插件随 npm 包安装在 `node_modules/@wetspace/wetspec-cli/scripts/py/`。Skill 仓库**不包含** `scripts/` 副本。
 
 ### references/
 - `spec_schema.md` — YAML 字段定义

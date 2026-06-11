@@ -51,7 +51,7 @@ ${moduleRows}
 ## 常用命令
 
 \`\`\`bash
-# 需已安装: npm install wetspec-cli 或 pnpm add wetspec-cli
+# 需已安装: npm install @wetspace/wetspec-cli 或 pnpm add @wetspace/wetspec-cli
 wetspec validate specs/
 wetspec sync-md specs/ --check
 wetspec coverage <prd> specs/
