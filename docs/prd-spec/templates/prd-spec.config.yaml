@@ -1,0 +1,12 @@
+# PRD-Spec 项目配置（可选）
+# 复制为 specs/.prd-spec.yaml
+
+version: 1
+
+# 产出根目录（固定为 specs，声明便于 Agent 发现）
+root: specs
+
+# PRD 外部输入索引（相对仓库根）
+prd_index: specs/prd-index.md
+
+# 省略 prd_index 则仅靠各 change 的 change.yaml 登记 PRD 路径

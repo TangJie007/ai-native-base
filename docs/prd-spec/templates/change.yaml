@@ -1,0 +1,42 @@
+# 复制到 specs/changes/{change-name}/change.yaml
+# 变更记录真相源（机器读）：映射、状态、PRD 追溯
+
+change: {change-name}
+status: draft # draft | in_progress | done | archived
+path: architectural # spike | bounded | architectural
+created: {YYYY-MM-DD}
+updated: {YYYY-MM-DD}
+
+# 外部 PRD 输入（仓库根相对路径或 URL）
+prd_inputs:
+  - path: PRD.md
+    locate: "§3.1"
+  # - path: https://feishu.cn/doc/xxx
+  #   locate: "摘录见 summary"
+
+# 本 change 影响的 atom（与 delta/、tasks/ 路径一致）
+atoms:
+  - domain: auth
+    atom: sms-login
+    operation: ADDED # ADDED | MODIFIED | REMOVED
+    delta: delta/auth/sms-login.md
+    tasks: tasks/auth/sms-login.md
+    target: specs/atom/auth/sms-login.md
+    prd_ref:
+      path: PRD.md
+      locate: "§3.1"
+
+summary: |
+  一句话变更摘要
+
+open_questions: []
+# - "锁定期间是否允许客服解锁？"
+
+# 实现阶段门禁（apply 前须 tasks.confirmed: true）
+tasks:
+  confirmed: false
+  complete: false
+
+archive:
+  at: null
+  # archived 后填写 ISO 日期
