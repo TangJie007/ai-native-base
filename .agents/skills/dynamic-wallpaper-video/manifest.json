@@ -1,0 +1,14 @@
+{
+  "name": "dynamic-wallpaper-video",
+  "version": "1.0.0",
+  "category": "Media / Wallpaper",
+  "description": "Produce seamless looping dynamic wallpaper videos for Lively, Wallpaper Engine, macOS, and phones: brief, loop craft, ffmpeg presets, and install docs.",
+  "compat": [
+    "claude-code",
+    "claude-ai",
+    "cursor",
+    "codex-cli",
+    "gemini-cli",
+    "opencode"
+  ]
+}
