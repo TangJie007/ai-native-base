@@ -1,0 +1,14 @@
+{
+  "name": "pixi-desktop-pet",
+  "version": "1.0.0",
+  "category": "Desktop Pet / PixiJS",
+  "description": "PixiJS v8 desktop-pet animation-frame workflow: spritesheet contract, AnimatedSprite playback, and pet state machine. Optional bridge from hatch-pet / Codex 8×9 atlases.",
+  "compat": [
+    "claude-code",
+    "claude-ai",
+    "cursor",
+    "codex-cli",
+    "gemini-cli",
+    "opencode"
+  ]
+}
