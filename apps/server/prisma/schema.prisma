@@ -1,0 +1,339 @@
+// SpecForge 编排服务 —— 业务数据库 schema（MySQL）
+// 对应 PRD §9 数据模型。向量数据（embedding）落在独立的 SQLite 库（data/vectors.db，node:sqlite 访问），
+// 不在此 schema 中，两者通过业务主键关联。
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ------------------------------------------------------------------
+// 用户与项目
+// ------------------------------------------------------------------
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  name         String
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  projects      Project[]
+  modelSettings ModelSettings?
+
+  @@map("users")
+}
+
+model Project {
+  id           String   @id @default(cuid())
+  userId       String   @map("user_id")
+  name         String
+  description  String   @default("") @db.Text
+  status       String   @default("draft")
+  currentStage String   @default("S1") @map("current_stage")
+  /// S3 依赖图人工确认卡点，见 PRD 6.1
+  depsConfirmed Boolean @default(false) @map("deps_confirmed")
+  /// StackConfig JSON（主栈锁定 + 次级选型）
+  stackConfig  Json     @map("stack_config")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  docs            RequirementDoc[]
+  items           RequirementItem[]
+  assumptions     Assumption[]
+  contracts       Contract[]
+  dependencies    ItemDependency[]
+  codeVersions    CodeVersion[]
+  fileLocks       FileLock[]
+  traces          AgentTrace[]
+  pipelineRuns    PipelineRun[]
+  sandbox         Sandbox?
+  regressionItems RegressionItem[]
+
+  @@index([userId])
+  @@map("projects")
+}
+
+// ------------------------------------------------------------------
+// S1 需求解析
+// ------------------------------------------------------------------
+
+model RequirementDoc {
+  id          String   @id @default(cuid())
+  projectId   String   @map("project_id")
+  version     Int      @default(1)
+  fileName    String   @map("file_name")
+  rawContent  String   @map("raw_content") @db.LongText
+  /// ParsedSpec JSON（entities / stateMachines / rules / contradictions / summary）
+  parsedSpec  Json?    @map("parsed_spec")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assumptions Assumption[]
+
+  @@index([projectId])
+  @@map("requirement_docs")
+}
+
+model Assumption {
+  id         String   @id @default(cuid())
+  docId      String   @map("doc_id")
+  projectId  String   @map("project_id")
+  code       String
+  category   String
+  question   String   @db.Text
+  aiDefault  String   @map("ai_default") @db.Text
+  impact     String   @default("") @db.Text
+  userAnswer String?  @map("user_answer") @db.Text
+  status     String   @default("pending")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  doc     RequirementDoc @relation(fields: [docId], references: [id], onDelete: Cascade)
+  project Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("assumptions")
+}
+
+model RequirementItem {
+  id            String   @id @default(cuid())
+  projectId     String   @map("project_id")
+  code          String
+  title         String
+  description   String   @default("") @db.Text
+  /// string[] JSON
+  acceptance    Json     @default("[]")
+  /// 逻辑依赖（条目 code 列表），DAG 以 item_dependencies 为准
+  dependsOn     Json     @default("[]") @map("depends_on")
+  layer         String   @default("fullstack")
+  priority      String   @default("P0")
+  status        String   @default("pending")
+  retryCount    Int      @default(0) @map("retry_count")
+  filePaths     Json     @default("[]") @map("file_paths")
+  /// ErrorSnapshot JSON
+  errorSnapshot Json?    @map("error_snapshot")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  project      Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  depsOut      ItemDependency[]  @relation("dep_item")
+  depsIn       ItemDependency[]  @relation("dep_depends_on")
+  traces       AgentTrace[]
+  verifications VerificationRun[]
+  fixes        FixRecord[]
+  regression   RegressionItem[]
+
+  @@index([projectId])
+  @@map("requirement_items")
+}
+
+// ------------------------------------------------------------------
+// S2 契约
+// ------------------------------------------------------------------
+
+model Contract {
+  id           String    @id @default(cuid())
+  projectId    String    @map("project_id")
+  version      Int       @default(1)
+  openapiYaml  String    @map("openapi_yaml") @db.LongText
+  tsTypes      String    @map("ts_types") @db.LongText
+  zodSchemas   String    @map("zod_schemas") @db.LongText
+  prismaSchema String    @map("prisma_schema") @db.LongText
+  errorCodes   String    @map("error_codes") @db.LongText
+  constants    String    @default("") @db.LongText
+  /// ContractStats JSON
+  stats        Json
+  locked       Boolean   @default(false)
+  lockedAt     DateTime? @map("locked_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("contracts")
+}
+
+// ------------------------------------------------------------------
+// S3 依赖编排
+// ------------------------------------------------------------------
+
+model ItemDependency {
+  id          String   @id @default(cuid())
+  projectId   String   @map("project_id")
+  itemId      String   @map("item_id")
+  dependsOnId String   @map("depends_on_id")
+  depType     String   @default("api") @map("dep_type")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  project   Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  item      RequirementItem @relation("dep_item", fields: [itemId], references: [id], onDelete: Cascade)
+  dependsOn RequirementItem @relation("dep_depends_on", fields: [dependsOnId], references: [id], onDelete: Cascade)
+
+  @@unique([itemId, dependsOnId])
+  @@index([projectId])
+  @@map("item_dependencies")
+}
+
+// ------------------------------------------------------------------
+// S4/S5 生成与验证
+// ------------------------------------------------------------------
+
+model CodeVersion {
+  id           String   @id @default(cuid())
+  projectId    String   @map("project_id")
+  versionNo    Int      @map("version_no")
+  snapshotPath String   @map("snapshot_path")
+  note         String   @default("") @db.Text
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("code_versions")
+}
+
+model FileLock {
+  id        String   @id @default(cuid())
+  projectId String   @map("project_id")
+  filePath  String   @map("file_path")
+  lockedBy  String   @map("locked_by")
+  lockedAt  DateTime @default(now()) @map("locked_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, filePath])
+  @@index([projectId])
+  @@map("file_locks")
+}
+
+model AgentTrace {
+  id            String   @id @default(cuid())
+  projectId     String   @map("project_id")
+  itemId        String?  @map("item_id")
+  agentName     String   @map("agent_name")
+  model         String   @default("mock-model")
+  action        String   @default("")
+  inputTokens   Int      @default(0) @map("input_tokens")
+  outputTokens  Int      @default(0) @map("output_tokens")
+  durationMs    Int      @default(0) @map("duration_ms")
+  inputSummary  String   @default("") @map("input_summary") @db.Text
+  outputSummary String   @default("") @map("output_summary") @db.Text
+  status        String   @default("running")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  project Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  item    RequirementItem? @relation(fields: [itemId], references: [id], onDelete: SetNull)
+
+  @@index([projectId])
+  @@index([itemId])
+  @@map("agent_traces")
+}
+
+model VerificationRun {
+  id         String   @id @default(cuid())
+  itemId     String   @map("item_id")
+  round      Int      @default(1)
+  checkType  String   @map("check_type")
+  passed     Boolean  @default(false)
+  errorLog   String?  @map("error_log") @db.LongText
+  durationMs Int      @default(0) @map("duration_ms")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  item RequirementItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([itemId])
+  @@map("verification_runs")
+}
+
+model FixRecord {
+  id            String   @id @default(cuid())
+  itemId        String   @map("item_id")
+  round         Int      @default(1)
+  /// ErrorSnapshot JSON
+  errorSnapshot Json     @map("error_snapshot")
+  patch         String   @default("") @db.LongText
+  result        String   @default("success")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  item RequirementItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([itemId])
+  @@map("fix_records")
+}
+
+// ------------------------------------------------------------------
+// 流水线与沙箱
+// ------------------------------------------------------------------
+
+model PipelineRun {
+  id           String    @id @default(cuid())
+  projectId    String    @map("project_id")
+  running      Boolean   @default(false)
+  currentStage String    @default("S1") @map("current_stage")
+  concurrency  Int       @default(3)
+  maxFixRounds Int       @default(3) @map("max_fix_rounds")
+  startedAt    DateTime  @default(now()) @map("started_at")
+  finishedAt   DateTime? @map("finished_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("pipeline_runs")
+}
+
+model Sandbox {
+  id         String   @id @default(cuid())
+  projectId  String   @unique @map("project_id")
+  provider   String   @default("mock")
+  status     String   @default("none")
+  previewUrl String?  @map("preview_url")
+  /// SandboxFile[] JSON
+  files      Json     @default("[]")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("sandboxes")
+}
+
+model RegressionItem {
+  id        String   @id @default(cuid())
+  projectId String   @map("project_id")
+  itemId    String   @map("item_id")
+  text      String   @db.Text
+  checked   Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  project Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  item    RequirementItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("regression_items")
+}
+
+// ------------------------------------------------------------------
+// 模型配置（用户级）
+// ------------------------------------------------------------------
+
+model ModelSettings {
+  id             String   @id @default(cuid())
+  userId         String   @unique @map("user_id")
+  provider       String   @default("mock")
+  baseUrl        String   @default("") @map("base_url")
+  /// 加密后的密钥，永不下发前端
+  apiKeyCipher   String?  @map("api_key_cipher") @db.Text
+  fallbackModel  String   @default("") @map("fallback_model")
+  /// ModelTierBinding[] JSON
+  tiers          Json     @default("[]")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("model_settings")
+}

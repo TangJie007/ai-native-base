@@ -1,0 +1,59 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --el-color-primary: #3f7a31;
+  --el-color-primary-light-3: #66a754;
+  --el-color-primary-light-5: #93c47f;
+  --el-color-primary-light-7: #c2e2b0;
+  --el-color-primary-light-8: #d9eec9;
+  --el-color-primary-light-9: #e9f8e0;
+  --el-color-primary-dark-2: #326327;
+  --el-border-radius-base: 8px;
+  --el-text-color-primary: #17171c;
+  --el-text-color-regular: #4a4a55;
+  --el-text-color-secondary: #6a6a76;
+  --el-border-color: #e8e8ee;
+  --el-border-color-light: #eeeef4;
+  --el-fill-color-light: #f4f3f8;
+}
+
+body {
+  font-family:
+    'Inter',
+    'PingFang SC',
+    'Microsoft YaHei',
+    system-ui,
+    -apple-system,
+    sans-serif;
+  margin: 0;
+}
+
+#app {
+  height: 100vh;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #d8d8e0;
+  border-radius: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.code-block {
+  font-family: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.7;
+  white-space: pre;
+}
+
+/* 待人工处理的条目整行高亮 */
+.el-table .needs-human-row {
+  --el-table-tr-bg-color: #fff5f5;
+}
