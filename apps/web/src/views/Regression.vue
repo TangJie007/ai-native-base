@@ -53,22 +53,28 @@ const progress = computed(() => (totalCount.value ? (checkedCount.value / totalC
 const allChecked = computed(() => totalCount.value > 0 && checkedCount.value === totalCount.value)
 const delivered = computed(() => allChecked.value)
 
+// 请求序号：快速切换项目时丢弃过期响应
+let loadSeq = 0
+
 async function load() {
-  if (!projectId.value) return
+  const pid = projectId.value
+  if (!pid) return
+  const seq = ++loadSeq
   loading.value = true
   try {
     const [list, itemList, pipelineInfo] = await Promise.all([
-      getRegression(projectId.value),
-      listItems(projectId.value),
-      getPipeline(projectId.value),
+      getRegression(pid),
+      listItems(pid),
+      getPipeline(pid),
     ])
+    if (seq !== loadSeq) return
     checklist.value = list
     items.value = itemList
     pipeline.value = pipelineInfo
   } catch {
     // 拦截器已提示
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 

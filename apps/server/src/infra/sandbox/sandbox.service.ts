@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common'
-import type { RequirementItem, SandboxFile, SandboxState } from '@specforge/shared'
+import { ErrorCode, type RequirementItem, type SandboxFile, type SandboxState } from '@specforge/shared'
+import { AppException } from '../../common/app-exception'
 import { PrismaService } from '../../prisma/prisma.service'
 import type { GeneratedFile } from '../llm/llm.types'
 import { SANDBOX_PROVIDER, type SandboxCheckResult, type SandboxProvider } from './sandbox.types'
@@ -54,8 +55,12 @@ export class SandboxService {
 
   /** 生成代码后写入沙箱，并同步文件清单 */
   async write(projectId: string, files: GeneratedFile[]): Promise<SandboxFile[]> {
-    await this.provider.create(projectId)
-    await this.provider.write(projectId, files)
+    try {
+      await this.provider.create(projectId)
+      await this.provider.write(projectId, files)
+    } catch (error) {
+      throw this.sandboxError(error)
+    }
     const list = await this.provider.list(projectId)
     await this.prisma.sandbox.upsert({
       where: { projectId },
@@ -85,11 +90,21 @@ export class SandboxService {
     round: number,
     files: GeneratedFile[],
   ): Promise<SandboxCheckResult[]> {
-    return this.provider.runChecks(projectId, item, round, files)
+    try {
+      return await this.provider.runChecks(projectId, item, round, files)
+    } catch (error) {
+      throw this.sandboxError(error)
+    }
   }
 
   async destroy(projectId: string): Promise<void> {
     await this.provider.destroy(projectId)
     await this.prisma.sandbox.updateMany({ where: { projectId }, data: { status: 'destroyed', files: [] } })
+  }
+
+  /** 统一把沙箱底层异常归一为 SANDBOX_ERROR，避免泄漏 provider 实现细节 */
+  private sandboxError(error: unknown): AppException {
+    const message = error instanceof Error ? error.message : String(error)
+    return new AppException(ErrorCode.SANDBOX_ERROR, 500, message)
   }
 }

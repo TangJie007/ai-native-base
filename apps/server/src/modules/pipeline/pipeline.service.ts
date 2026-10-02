@@ -1,9 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { Injectable, Logger, type OnModuleInit } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { Prisma } from '@prisma/client'
 import {
   DEFAULT_CONCURRENCY,
   DEFAULT_MAX_FIX_ROUNDS,
+  ERROR_MESSAGES,
   ErrorCode,
   PIPELINE_STAGES,
   VERIFICATION_CHECK_META,
@@ -57,7 +58,7 @@ interface RunContext {
  * 失败不阻塞其它条目；全部结束后生成人工回归清单（卡点四）。
  */
 @Injectable()
-export class PipelineService {
+export class PipelineService implements OnModuleInit {
   private readonly logger = new Logger(PipelineService.name)
   /** 正在执行的项目，避免重复启动 */
   private readonly active = new Set<string>()
@@ -78,6 +79,25 @@ export class PipelineService {
     private readonly traces: TraceService,
     private readonly gateway: PipelineGateway,
   ) {}
+
+  /* ------------------------------ 生命周期 ------------------------------ */
+
+  /** 进程重启后清理遗留的「运行中」流水线记录，避免状态永久锁死在 generating */
+  async onModuleInit(): Promise<void> {
+    try {
+      const { count } = await this.prisma.pipelineRun.updateMany({
+        where: { running: true },
+        data: { running: false, finishedAt: new Date() },
+      })
+      await this.prisma.project.updateMany({
+        where: { status: 'generating' },
+        data: { status: 'paused' },
+      })
+      if (count > 0) this.logger.warn(`启动时清理 ${count} 条未正常结束的流水线记录`)
+    } catch (error) {
+      this.logger.error(`清理遗留流水线记录失败：${messageOf(error)}`)
+    }
+  }
 
   /* ------------------------------ 查询 ------------------------------ */
 
@@ -187,8 +207,8 @@ export class PipelineService {
   async resolveItem(userId: string, itemId: string, dto: ResolveItemDto): Promise<RequirementItem> {
     const item = await this.projects.assertItemOwned(userId, itemId)
     const status = item.status as RequirementItem['status']
-    // blocked 条目（依赖未通过被阻断）也允许人工重跑（B-9）
-    if (!['failed', 'needs_human', 'passed', 'blocked'].includes(status)) {
+    // blocked 条目（依赖未通过被阻断）也允许人工重跑（B-9）；passed 已通过，无需重跑
+    if (!['failed', 'needs_human', 'blocked'].includes(status)) {
       throw conflict(ErrorCode.ITEM_NOT_RESOLVABLE, { status })
     }
 
@@ -220,6 +240,8 @@ export class PipelineService {
     dto: CheckRegressionDto,
   ): Promise<PipelineStatus> {
     await this.projects.assertOwned(userId, projectId)
+    // 流水线运行期间回归清单仍在重建，禁止勾选，避免误判全部通过而提前交付
+    if (this.active.has(projectId)) throw conflict(ErrorCode.PIPELINE_ALREADY_RUNNING, { projectId })
 
     await this.prisma.regressionItem.updateMany({
       where: { projectId, itemId: dto.itemId, text: dto.text },
@@ -317,8 +339,9 @@ export class PipelineService {
 
     const wasInterrupted = this.interrupted.has(projectId)
     this.interrupted.delete(projectId)
-    this.active.delete(projectId)
+    // 先落终态再释放占位：收尾期间 active 仍被持有，防止新任务在 finish/drain 窗口重入（M6）
     await this.finish(projectId, wasInterrupted || interrupted, false)
+    this.active.delete(projectId)
     await this.drainPendingRetries(projectId)
   }
 
@@ -449,6 +472,11 @@ export class PipelineService {
 
   /** 单条目重跑：重新生成 → 校验 → 修复，结束后刷新回归清单 */
   private async runSingle(projectId: string, itemId: string): Promise<void> {
+    // 已有任务在跑则登记待唤醒，避免与主批次并发写同一项目状态（M2）
+    if (this.active.has(projectId)) {
+      this.queueRetry(projectId, itemId)
+      return
+    }
     this.active.add(projectId)
     try {
       const [project, item] = await Promise.all([
@@ -475,13 +503,16 @@ export class PipelineService {
       })
       await this.emitStatus(projectId)
 
-      await this.processItem(project as unknown as Row, item as unknown as Row, contract, ctx)
+      const status = await this.processItem(project as unknown as Row, item as unknown as Row, contract, ctx)
 
-      await this.prisma.project.update({
-        where: { id: projectId },
-        data: { status: 'awaiting_regression', currentStage: 'S5' },
-      })
-      await this.buildRegression(projectId)
+      // 仅在条目真正执行后推进到 S5；blocked（依赖未通过、未生成）保持原状态
+      if (status !== 'blocked') {
+        await this.prisma.project.update({
+          where: { id: projectId },
+          data: { status: 'awaiting_regression', currentStage: 'S5' },
+        })
+        await this.buildRegression(projectId)
+      }
     } finally {
       this.active.delete(projectId)
       await this.emitStatus(projectId)
@@ -628,6 +659,8 @@ export class PipelineService {
     blocking: SandboxCheckResult,
   ): Promise<void> {
     const snapshot = this.snapshot(blocking.checkType, round + 1, blocking.errorLog ?? '')
+    // 到顶了是「修复轮次耗尽」而非普通检查失败，明确告知人工介入原因
+    snapshot.message = ERROR_MESSAGES[ErrorCode.FIX_LIMIT_REACHED]
     const lastFix = await this.prisma.fixRecord.findFirst({
       where: { itemId },
       orderBy: { createdAt: 'desc' },
@@ -664,8 +697,11 @@ export class PipelineService {
       }
     }
 
-    await this.prisma.regressionItem.deleteMany({ where: { projectId } })
-    if (data.length > 0) await this.prisma.regressionItem.createMany({ data })
+    // 删除与重建必须原子完成，否则中途失败会留下空回归清单（M5）
+    await this.prisma.$transaction(async (tx) => {
+      await tx.regressionItem.deleteMany({ where: { projectId } })
+      if (data.length > 0) await tx.regressionItem.createMany({ data })
+    })
   }
 
   private mergeFiles(base: GeneratedFile[], patch: GeneratedFile[]): GeneratedFile[] {

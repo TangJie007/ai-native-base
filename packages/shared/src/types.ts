@@ -444,6 +444,7 @@ export interface StageInfo {
 /** 人工回归清单，见 PRD 3.4 VER-08 */
 export interface RegressionItem {
   id: string
+  projectId: string
   itemId: string
   text: string
   checked: boolean

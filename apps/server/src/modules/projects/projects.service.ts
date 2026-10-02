@@ -84,7 +84,6 @@ export class ProjectsService {
       data: {
         name: dto.name ?? undefined,
         description: dto.description ?? undefined,
-        status: dto.status ?? undefined,
         stackConfig: stackConfig as unknown as object,
       },
     })

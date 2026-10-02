@@ -106,8 +106,11 @@ export class DependenciesService {
       data.push({ projectId, itemId: item.id, dependsOnId: dependsOn.id, depType: dep.depType })
     }
 
-    await this.prisma.itemDependency.deleteMany({ where: { projectId } })
-    if (data.length > 0) await this.prisma.itemDependency.createMany({ data })
+    // 边集整体替换需原子完成，避免删除成功但重建失败导致依赖图丢失（M5）
+    await this.prisma.$transaction(async (tx) => {
+      await tx.itemDependency.deleteMany({ where: { projectId } })
+      if (data.length > 0) await tx.itemDependency.createMany({ data })
+    })
 
     await this.prisma.project.update({
       where: { id: projectId },
@@ -122,7 +125,7 @@ export class DependenciesService {
 
     const itemRows = await this.prisma.requirementItem.findMany({
       where: { projectId },
-      select: { id: true },
+      select: { id: true, code: true, title: true, layer: true },
     })
     const ids = new Set(itemRows.map((row) => row.id))
 
@@ -144,8 +147,22 @@ export class DependenciesService {
       data.push({ projectId, itemId: edge.itemId, dependsOnId: edge.dependsOnId, depType: edge.depType })
     }
 
-    await this.prisma.itemDependency.deleteMany({ where: { projectId } })
-    if (data.length > 0) await this.prisma.itemDependency.createMany({ data })
+    // 拒绝带环依赖图：环会让 S4 批次分层退化为强制放行，破坏执行顺序（PRD 3.3 PLAN-06）
+    const { cycleRemoved } = buildBatches(
+      itemRows.map((row) => ({
+        id: row.id,
+        code: row.code,
+        title: row.title,
+        layer: row.layer as RequirementItem['layer'],
+      })),
+      data.map((edge) => ({ itemId: edge.itemId, dependsOnId: edge.dependsOnId })),
+    )
+    if (cycleRemoved > 0) throw badRequest(ErrorCode.CYCLE_DETECTED, { cycleNodes: cycleRemoved })
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.itemDependency.deleteMany({ where: { projectId } })
+      if (data.length > 0) await tx.itemDependency.createMany({ data })
+    })
 
     await this.prisma.project.update({ where: { id: projectId }, data: { depsConfirmed: false } })
     return this.get(projectId)

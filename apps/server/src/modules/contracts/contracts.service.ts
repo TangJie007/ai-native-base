@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common'
 import {
+  EMBEDDING_MODEL_ID,
   ErrorCode,
   type Contract,
   type ParsedSpec,
@@ -8,6 +9,7 @@ import {
 } from '@specforge/shared'
 import { conflict, notFound } from '../../common/app-exception'
 import { toContract, toRequirementItem, type Row } from '../../common/mappers'
+import type { GeneratedContract } from '../../infra/llm/llm.types'
 import { LlmService } from '../../infra/llm/llm.service'
 import { VectorService } from '../../infra/vector/vector.service'
 import { PrismaService } from '../../prisma/prisma.service'
@@ -66,7 +68,8 @@ export class ContractsService {
       where: { projectId },
       orderBy: { version: 'desc' },
     })
-    const spec = (doc?.parsedSpec as ParsedSpec | null) ?? EMPTY_SPEC
+    if (!doc) throw conflict(ErrorCode.NO_REQUIREMENT_DOC, { projectId })
+    const spec = (doc.parsedSpec as ParsedSpec | null) ?? EMPTY_SPEC
     const items: RequirementItem[] = itemRows.map((row) => toRequirementItem(row as unknown as Row))
 
     const generated = await this.traces.track(
@@ -79,25 +82,8 @@ export class ContractsService {
         }),
     )
 
-    const last = await this.prisma.contract.findFirst({
-      where: { projectId },
-      orderBy: { version: 'desc' },
-    })
-    const version = (last?.version ?? 0) + 1
-
-    const row = await this.prisma.contract.create({
-      data: {
-        projectId,
-        version,
-        openapiYaml: generated.openapiYaml,
-        tsTypes: generated.tsTypes,
-        zodSchemas: generated.zodSchemas,
-        prismaSchema: generated.prismaSchema,
-        errorCodes: generated.errorCodes,
-        constants: generated.constants,
-        stats: generated.stats as unknown as object,
-      },
-    })
+    // 版本分配与写入放在同一事务内，并对唯一约束冲突重试，避免并发生成产生重复版本（D-10）
+    const row = await this.createContractRow(projectId, generated)
 
     await this.prisma.project.update({
       where: { id: projectId },
@@ -108,11 +94,44 @@ export class ContractsService {
       ownerType: 'contract',
       ownerId: row.id,
       projectId,
-      model: 'pseudo-bow-64',
+      model: EMBEDDING_MODEL_ID,
       text: generated.openapiYaml,
     })
 
     return toContract(row as unknown as Row)
+  }
+
+  /** 事务内读取最新版本号并写入；命中 [projectId, version] 唯一冲突时重试 */
+  private async createContractRow(projectId: string, generated: GeneratedContract) {
+    const maxAttempts = 3
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await this.prisma.$transaction(async (tx) => {
+          const last = await tx.contract.findFirst({
+            where: { projectId },
+            orderBy: { version: 'desc' },
+          })
+          const version = (last?.version ?? 0) + 1
+          return tx.contract.create({
+            data: {
+              projectId,
+              version,
+              openapiYaml: generated.openapiYaml,
+              tsTypes: generated.tsTypes,
+              zodSchemas: generated.zodSchemas,
+              prismaSchema: generated.prismaSchema,
+              errorCodes: generated.errorCodes,
+              constants: generated.constants,
+              stats: generated.stats as unknown as object,
+            },
+          })
+        })
+      } catch (error) {
+        const code = (error as { code?: string })?.code
+        if (code === 'P2002' && attempt < maxAttempts) continue
+        throw error
+      }
+    }
   }
 
   /** 卡点二：锁定契约后才允许生成依赖图（PRD 3.2 CT-08） */

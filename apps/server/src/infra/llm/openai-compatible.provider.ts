@@ -34,6 +34,7 @@ export class OpenAiCompatibleProvider implements LlmProvider {
   constructor(
     private readonly baseUrl: string,
     private readonly apiKey: string,
+    private readonly timeoutMs = 60000,
   ) {}
 
   isAvailable(): boolean {
@@ -134,6 +135,8 @@ export class OpenAiCompatibleProvider implements LlmProvider {
     }
     const url = `${this.baseUrl.replace(/\/$/, '')}/chat/completions`
     let response: ChatResponse
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs)
     try {
       const res = await fetch(url, {
         method: 'POST',
@@ -141,6 +144,7 @@ export class OpenAiCompatibleProvider implements LlmProvider {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${this.apiKey}`,
         },
+        signal: controller.signal,
         body: JSON.stringify({
           model,
           messages: [
@@ -157,8 +161,16 @@ export class OpenAiCompatibleProvider implements LlmProvider {
       }
       response = (await res.json()) as ChatResponse
     } catch (error) {
-      this.logger.error(`模型调用失败：${error instanceof Error ? error.message : String(error)}`)
-      throw new AppException(ErrorCode.LLM_ERROR, 502, error instanceof Error ? error.message : String(error))
+      const message =
+        error instanceof Error && error.name === 'AbortError'
+          ? `模型调用超时（${this.timeoutMs}ms）`
+          : error instanceof Error
+            ? error.message
+            : String(error)
+      this.logger.error(`模型调用失败：${message}`)
+      throw new AppException(ErrorCode.LLM_ERROR, 502, message)
+    } finally {
+      clearTimeout(timer)
     }
 
     const content = response.choices?.[0]?.message?.content ?? '{}'

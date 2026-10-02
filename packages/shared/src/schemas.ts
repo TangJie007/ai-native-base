@@ -31,21 +31,8 @@ export type CreateProjectDto = z.infer<typeof createProjectSchema>
 export const updateProjectSchema = z.object({
   name: z.string().min(1).max(64).optional(),
   description: z.string().max(500).optional(),
-  status: z
-    .enum([
-      'draft',
-      'parsing',
-      'awaiting_assumptions',
-      'awaiting_contract',
-      'awaiting_dependencies',
-      'generating',
-      'verifying',
-      'awaiting_regression',
-      'delivered',
-      'paused',
-      'failed',
-    ])
-    .optional(),
+  // status 不出现在 DTO：项目状态只能由流水线服务按状态机迁移，禁止客户端直改
+  // （否则可伪造 delivered 绕过人工回归卡点，或置 generating 使项目无法删除）
   stackConfig: z
     .object({
       uiLibrary: z.enum(['Element Plus', 'Naive UI', 'Ant Design Vue']).optional(),

@@ -49,8 +49,6 @@ model Project {
   assumptions     Assumption[]
   contracts       Contract[]
   dependencies    ItemDependency[]
-  codeVersions    CodeVersion[]
-  fileLocks       FileLock[]
   traces          AgentTrace[]
   pipelineRuns    PipelineRun[]
   sandbox         Sandbox?
@@ -77,6 +75,8 @@ model RequirementDoc {
   project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
   assumptions Assumption[]
 
+  // 项目内文档版本单调递增，落库层约束防并发重复
+  @@unique([projectId, version])
   @@index([projectId])
   @@map("requirement_docs")
 }
@@ -185,34 +185,6 @@ model ItemDependency {
 // ------------------------------------------------------------------
 // S4/S5 生成与验证
 // ------------------------------------------------------------------
-
-model CodeVersion {
-  id           String   @id @default(cuid())
-  projectId    String   @map("project_id")
-  versionNo    Int      @map("version_no")
-  snapshotPath String   @map("snapshot_path")
-  note         String   @default("") @db.Text
-  createdAt    DateTime @default(now()) @map("created_at")
-
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-
-  @@index([projectId])
-  @@map("code_versions")
-}
-
-model FileLock {
-  id        String   @id @default(cuid())
-  projectId String   @map("project_id")
-  filePath  String   @map("file_path")
-  lockedBy  String   @map("locked_by")
-  lockedAt  DateTime @default(now()) @map("locked_at")
-
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-
-  @@unique([projectId, filePath])
-  @@index([projectId])
-  @@map("file_locks")
-}
 
 model AgentTrace {
   id            String   @id @default(cuid())

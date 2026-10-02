@@ -128,12 +128,12 @@ SpecForge 不是「一键生成整个项目」的黑盒，而是一条**需求�
 
 | 编号 | 功能 | 说明 | 优先级 |
 |---|---|---|---|
-| PLT-01 | 注册登录 | 邮箱 / 手机验证码 | P0 |
+| PLT-01 | 注册登录 | 邮箱 + 密码（JWT 会话） | P0 |
 | PLT-02 | 项目隔离 | 用户仅可见自己的项目与数据 | P0 |
 | PLT-03 | 项目列表 | 新建、列表、搜索、删除 | P0 |
 | PLT-04 | 阶段进度展示 | 四阶段进度节点展示（主界面不展示 trace） | P0 |
 | PLT-05 | Trace 面板 | 可展开查看 Agent 完整轨迹（次级功能） | P0 |
-| PLT-06 | 版本对比与回滚 | 版本 diff，一键回滚 | P1 |
+| PLT-06 | 版本对比与回滚 | 版本 diff，一键回滚（规划中，本期不实现） | P1 |
 | PLT-07 | 模型配置 | 用户自选模型供应商与模型，配 API Key | P0 |
 | PLT-08 | 用量与成本统计 | 按项目统计 token 消耗与费用 | P1 |
 
@@ -272,7 +272,9 @@ SpecForge 不是「一键生成整个项目」的黑盒，而是一条**需求�
 | retry_count | int | 已修复轮次 |
 | file_paths | string[] | 涉及文件路径 |
 | error_snapshot | json | 最近一次失败的错误现场 |
-| fix_history | json[] | 修复历史记录 |
+| priority | enum | P0 / P1 |
+
+> 修复历史不内联在条目上，独立存放于 `fix_records` 表（见 §9），通过 `GET /items/:id/fixes` 查询。
 
 ---
 
@@ -293,7 +295,7 @@ SpecForge 不是「一键生成整个项目」的黑盒，而是一条**需求�
 | 中断生成 | S4 执行中 | 随时暂停，已生成代码保留 |
 | 失败条目处理 | 条目置为 `needs_human` | 查看错误现场，手动修改或调整需求后重跑 |
 | 人工回归 | S5 最后一步 | 勾选验收清单 |
-| 文件保护标记 | 任意时刻 | 标记已修改文件为不可覆盖 |
+| 文件保护标记 | 任意时刻 | 标记已修改文件为不可覆盖（P1，本期未落库 `file_locks`） |
 
 ### 6.3 过程可见性
 
@@ -364,15 +366,18 @@ SpecForge 不是「一键生成整个项目」的黑盒，而是一条**需求�
 
 > 关键：先定义接口，P0 用现成服务实现，P1 替换为自建 Docker 时业务代码零改动。
 
-| 接口方法 | 职责 |
-|---|---|
-| `create(project_id)` | 创建隔离环境，返回 sandbox_id |
-| `write_file(path, content)` | 写入文件 |
-| `read_file(path)` | 读取文件 |
-| `exec(command, timeout)` | 执行命令，返回 stdout / stderr / exit_code |
-| `expose_port(port)` | 暴露预览地址 |
-| `snapshot()` | 打包当前状态，生成版本快照 |
-| `destroy(sandbox_id)` | 销毁环境 |
+| 接口方法 | 阶段 | 职责 |
+|---|---|---|
+| `create(project_id)` | P0 | 创建隔离环境 |
+| `write_file(path, content)` | P0 | 写入文件 |
+| `read_file(path)` | P0 | 读取文件 |
+| `run_checks(item, round, files)` | P0 | 按条目执行构建 / 类型 / 接口探活 / 前端启动 / 前后端联通检查，返回逐项结果 |
+| `destroy(sandbox_id)` | P0 | 销毁环境 |
+| `exec(command, timeout)` | P1 | 执行任意命令，返回 stdout / stderr / exit_code |
+| `expose_port(port)` | P1 | 暴露预览端口（P0 由 provider 在创建时直接返回 preview_url） |
+| `snapshot()` | P1 | 打包当前状态，生成版本快照 |
+
+> P0（mock 沙箱）实现 `create / write_file / read_file / run_checks / destroy`；`exec / expose_port / snapshot` 归入 P1，随自建 Docker 沙箱一并落地，避免业务层过早依赖进程执行能力。
 
 | 实现版本 | 方案 | 周期 |
 |---|---|---|
@@ -433,19 +438,23 @@ SpecForge 不是「一键生成整个项目」的黑盒，而是一条**需求�
 
 | 表名 | 主要字段 | 说明 |
 |---|---|---|
-| `users` | id, email, password_hash, created_at | 用户 |
-| `projects` | id, user_id, name, stack_config, status, created_at | 项目 |
-| `requirement_docs` | id, project_id, version, raw_content, parsed_spec | 需求文档版本 |
-| `assumptions` | id, doc_id, category, question, ai_default, user_answer, status | 假设清单 |
-| `contracts` | id, project_id, version, openapi_yaml, ts_types, ddl, locked | 契约 |
+| `users` | id, email, password_hash, name, created_at | 用户 |
+| `projects` | id, user_id, name, description, stack_config, status, current_stage, deps_confirmed, created_at | 项目 |
+| `requirement_docs` | id, project_id, version, file_name, raw_content, parsed_spec | 需求文档版本 |
+| `assumptions` | id, doc_id, project_id, code, category, question, ai_default, impact, user_answer, status | 假设清单 |
+| `contracts` | id, project_id, version, openapi_yaml, ts_types, zod_schemas, prisma_schema, error_codes, constants, stats, locked, locked_at | 契约 |
 | `requirement_items` | 见 5.2 | 需求条目 |
-| `item_dependencies` | id, item_id, depends_on_id, dep_type | 依赖边 |
-| `code_versions` | id, project_id, version_no, snapshot_path, created_at | 代码版本 |
-| `file_locks` | id, project_id, file_path, locked_by, locked_at | 人工修改保护 |
-| `agent_traces` | id, project_id, item_id, agent_name, model, input_tokens, output_tokens, duration_ms, input_summary, output_summary, status | Agent 轨迹 |
-| `verification_runs` | id, item_id, round, check_type, passed, error_log | 验证记录 |
+| `item_dependencies` | id, project_id, item_id, depends_on_id, dep_type | 依赖边 |
+| `agent_traces` | id, project_id, item_id, agent_name, model, action, input_tokens, output_tokens, duration_ms, input_summary, output_summary, status | Agent 轨迹 |
+| `verification_runs` | id, item_id, round, check_type, passed, error_log, duration_ms | 验证记录 |
 | `fix_records` | id, item_id, round, error_snapshot, patch, result | 修复记录 |
+| `pipeline_runs` | id, project_id, running, current_stage, concurrency, max_fix_rounds, started_at, finished_at | 流水线运行态 |
+| `sandboxes` | id, project_id, provider, status, preview_url, files, updated_at | 沙箱状态与产物 |
+| `regression_items` | id, project_id, item_id, text, checked | 人工回归清单（卡点四） |
+| `model_settings` | id, user_id, provider, base_url, api_key_cipher, fallback_model, tiers | 用户级模型配置 |
 | `vector_embeddings`（SQLite，非 Prisma） | id, owner_type, owner_id, project_id, model, dim, vector(blob), text, created_at | 向量检索，余弦相似度暴力检索 |
+
+> 代码版本快照（`code_versions`）与人工修改文件保护（`file_locks`）属于 PLT-06 版本回滚能力，随 P1 一并实现，本期不落库。
 
 ---
 

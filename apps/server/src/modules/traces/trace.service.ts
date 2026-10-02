@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
 import type { AgentName, AgentTrace, TraceStatus } from '@specforge/shared'
 import type { LlmUsage } from '../../infra/llm/llm.types'
 import { toAgentTrace, type Row } from '../../common/mappers'
@@ -31,6 +31,8 @@ export interface TrackedCall<T> {
  */
 @Injectable()
 export class TraceService {
+  private readonly logger = new Logger(TraceService.name)
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly gateway: PipelineGateway,
@@ -72,7 +74,7 @@ export class TraceService {
     const startedAt = Date.now()
     try {
       const { result, usage, agent } = await call()
-      await this.record({
+      await this.safeRecord({
         projectId: meta.projectId,
         itemId: meta.itemId,
         agent,
@@ -86,7 +88,8 @@ export class TraceService {
       })
       return result
     } catch (error) {
-      await this.record({
+      // 记录失败不能覆盖原始业务错误
+      await this.safeRecord({
         projectId: meta.projectId,
         itemId: meta.itemId,
         agent: meta.agent ?? 'parser',
@@ -98,6 +101,17 @@ export class TraceService {
         status: 'failed',
       })
       throw error
+    }
+  }
+
+  /** 轨迹记录属于旁路可观测能力，失败只记日志，不影响主流程与原始错误 */
+  private async safeRecord(input: TraceRecordInput): Promise<void> {
+    try {
+      await this.record(input)
+    } catch (error) {
+      this.logger.warn(
+        `轨迹记录失败（不影响主流程）：${error instanceof Error ? error.message : String(error)}`,
+      )
     }
   }
 

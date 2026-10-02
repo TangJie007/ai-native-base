@@ -56,8 +56,10 @@ export class LlmService {
   private readonly logger = new Logger(LlmService.name)
   private readonly defaults: UserLlmConfig
   private readonly overrides = new Map<string, UserLlmConfig>()
+  private readonly timeoutMs: number
 
   constructor(private readonly config: ConfigService) {
+    this.timeoutMs = this.config.get<number>('llmTimeoutMs') ?? 60000
     const llm = this.config.get<AppConfiguration['llm']>('llm')
     const cfg: UserLlmConfig = {
       providerName: llm?.provider ?? 'mock',
@@ -280,10 +282,14 @@ export class LlmService {
     const key = `${cfg.providerName}|${cfg.baseUrl}|${cfg.apiKey}`
     if (cfg.provider && cfg.providerKey === key) return cfg.provider
     cfg.providerKey = key
-    if (cfg.providerName === 'openai' && cfg.baseUrl && cfg.apiKey) {
-      cfg.provider = new OpenAiCompatibleProvider(cfg.baseUrl, cfg.apiKey)
+    // 兼容 openai-compatible / openai_compatible / compatible 等历史写法
+    const normalized = ['openai-compatible', 'openai_compatible', 'compatible'].includes(cfg.providerName)
+      ? 'openai'
+      : cfg.providerName
+    if (normalized === 'openai' && cfg.baseUrl && cfg.apiKey) {
+      cfg.provider = new OpenAiCompatibleProvider(cfg.baseUrl, cfg.apiKey, this.timeoutMs)
     } else {
-      if (cfg.providerName !== 'mock') {
+      if (normalized !== 'mock') {
         this.logger.warn(`适配器 ${cfg.providerName} 缺少 baseUrl/apiKey，回退到 Mock 适配器。`)
       }
       cfg.provider = new MockLlmProvider()

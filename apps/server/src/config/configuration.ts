@@ -23,7 +23,23 @@ export interface AppConfiguration {
   }
 }
 
-const DEFAULT_CORS_ORIGINS = ['http://localhost:5173', 'http://localhost:5174']
+export const DEFAULT_CORS_ORIGINS = ['http://localhost:5173', 'http://localhost:5174']
+
+/** 解析 CORS 白名单：为空或全部空串时回退开发默认值，避免跨域被全量拒绝 */
+export function resolveCorsOrigins(): string[] {
+  const parsed = (process.env.CORS_ORIGINS ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+  return parsed.length > 0 ? parsed : DEFAULT_CORS_ORIGINS
+}
+
+/** 归一化 LLM provider 名称：兼容 'openai-compatible' 等写法，统一为内部标识 */
+function resolveLlmProvider(): string {
+  const raw = (process.env.LLM_PROVIDER ?? 'mock').trim().toLowerCase()
+  if (raw === 'openai-compatible' || raw === 'openai_compatible' || raw === 'compatible') return 'openai'
+  return raw
+}
 
 /** 生产环境强制校验 JWT 密钥强度，避免带着默认值上线 */
 function resolveJwtSecret(): string {
@@ -45,9 +61,7 @@ export default (): AppConfiguration => ({
     secret: resolveJwtSecret(),
     expiresIn: process.env.JWT_EXPIRES_IN ?? '7d',
   },
-  corsOrigins: (process.env.CORS_ORIGINS?.split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean)) ?? DEFAULT_CORS_ORIGINS,
+  corsOrigins: resolveCorsOrigins(),
   vectorDbPath: process.env.VECTOR_DB_PATH ?? './data/vectors.db',
   sandboxProvider: (process.env.SANDBOX_PROVIDER as AppConfiguration['sandboxProvider']) ?? 'mock',
   pipelineConcurrency: Number(process.env.PIPELINE_CONCURRENCY ?? DEFAULT_CONCURRENCY),
@@ -55,7 +69,7 @@ export default (): AppConfiguration => ({
   llmTimeoutMs: Number(process.env.LLM_TIMEOUT_MS ?? 60000),
   llmMaxRetries: Number(process.env.LLM_MAX_RETRIES ?? 1),
   llm: {
-    provider: process.env.LLM_PROVIDER ?? 'mock',
+    provider: resolveLlmProvider(),
     baseUrl: process.env.LLM_BASE_URL ?? '',
     apiKey: process.env.LLM_API_KEY ?? '',
     models: {

@@ -46,19 +46,24 @@ function formatSize(size: number): string {
   return `${(size / 1024 / 1024).toFixed(1)} MB`
 }
 
+// 请求序号：快速切换项目时丢弃过期响应
+let loadSeq = 0
+
 async function load() {
-  if (!projectId.value) return
+  const pid = projectId.value
+  if (!pid) return
+  const seq = ++loadSeq
   loading.value = true
   try {
-    const state = await getSandbox(projectId.value).catch(() => null)
+    const state = await getSandbox(pid).catch(() => null)
+    const fileList = state?.files?.length ? state.files : await listSandboxFiles(pid).catch(() => [])
+    if (seq !== loadSeq) return
     sandbox.value = state
-    files.value = state?.files?.length
-      ? state.files
-      : await listSandboxFiles(projectId.value).catch(() => [])
+    files.value = fileList
   } catch {
     // 拦截器已提示
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 

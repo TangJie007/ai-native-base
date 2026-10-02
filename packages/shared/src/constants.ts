@@ -3,6 +3,7 @@ import type {
   AssumptionCategory,
   AssumptionStatus,
   DependencyType,
+  GateKey,
   ItemLayer,
   ItemStatus,
   ModelTier,
@@ -98,14 +99,22 @@ export const VERIFICATION_CHECK_META: Record<VerificationCheckType, { label: str
   security_scan: { label: '安全扫描', order: 8, blocking: true },
 }
 
-/** 五阶段定义，见 PRD 4.1 */
-export const PIPELINE_STAGES: { key: StageKey; label: string; gate: string | null }[] = [
-  { key: 'S1', label: '需求解析', gate: '假设确认' },
-  { key: 'S2', label: '契约生成', gate: '契约确认' },
-  { key: 'S3', label: '计划编排', gate: '依赖确认' },
+/** 五阶段定义，见 PRD 4.1。gate 用机器可判定的 GateKey，展示标签见 GATE_META */
+export const PIPELINE_STAGES: { key: StageKey; label: string; gate: GateKey | null }[] = [
+  { key: 'S1', label: '需求解析', gate: 'assumptions' },
+  { key: 'S2', label: '契约生成', gate: 'contract' },
+  { key: 'S3', label: '计划编排', gate: 'dependencies' },
   { key: 'S4', label: '代码生成', gate: null },
-  { key: 'S5', label: '验证交付', gate: '人工回归' },
+  { key: 'S5', label: '验证交付', gate: 'regression' },
 ]
+
+/** 四个卡点的展示元数据（三个强阻断 + 人工回归），与 GateKey 一一对应 */
+export const GATE_META: Record<GateKey, StatusMeta> = {
+  assumptions: { label: '假设确认', type: 'warning' },
+  contract: { label: '契约确认', type: 'warning' },
+  dependencies: { label: '依赖确认', type: 'warning' },
+  regression: { label: '人工回归', type: 'warning' },
+}
 
 export const MODEL_TIER_META: Record<ModelTier, { label: string; stages: string[] }> = {
   high: { label: '高能力模型', stages: ['S1 需求解析', 'S2 契约生成', 'S3 依赖分析'] },
@@ -140,6 +149,15 @@ export const DEFAULT_STACK_CONFIG: StackConfig = {
 export const DEFAULT_CONCURRENCY = 3
 export const DEFAULT_MAX_FIX_ROUNDS = 3
 export const DEFAULT_PAGE_SIZE = 20
+
+/* ------------------------------------------------------------------ */
+/* 向量检索（PRD 8.1 vector_embeddings 的 model/dim）                  */
+/* ------------------------------------------------------------------ */
+
+/** 内置伪嵌入（词袋）维度：node:sqlite 侧向量存储与召回共用，改维度需同步重建索引 */
+export const EMBEDDING_DIM = 64
+/** 当前使用的嵌入模型标识（写入 vector_embeddings.model） */
+export const EMBEDDING_MODEL_ID = 'pseudo-bow-64'
 
 /* ------------------------------------------------------------------ */
 /* 其他常量                                                            */

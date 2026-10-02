@@ -39,6 +39,11 @@ async function load() {
 }
 
 async function save() {
+  const emptyTier = tiers.value.find((t) => !t.model.trim())
+  if (emptyTier) {
+    ElMessage.warning(`请填写「${MODEL_TIER_META[emptyTier.tier].label}」档位的模型名`)
+    return
+  }
   saving.value = true
   try {
     const payload = {

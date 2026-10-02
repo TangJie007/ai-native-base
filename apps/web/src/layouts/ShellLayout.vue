@@ -59,10 +59,12 @@ const groups: { title: string; items: NavItem[] }[] = [
 const pageTitle = computed(() => (route.meta.title as string) || '')
 
 // 导航时携带当前项目上下文，保证页面切换不丢失 projectId
+// 优先取 URL 上的 projectId（从外部链接进入某项目时 store 可能尚未同步），其次回退到 store
 function navTarget(name: string) {
+  const pid = (route.query.projectId as string | undefined) || projectStore.currentId
   return {
     name,
-    query: projectStore.currentId ? { projectId: projectStore.currentId } : undefined,
+    query: pid ? { projectId: pid } : undefined,
   }
 }
 

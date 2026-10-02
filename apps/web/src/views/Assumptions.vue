@@ -45,20 +45,26 @@ const editVisible = ref(false)
 const editTarget = ref<Assumption | null>(null)
 const editAnswer = ref('')
 
+// 请求序号：快速切换项目时丢弃过期响应
+let loadSeq = 0
+
 async function load() {
-  if (!projectId.value) return
+  const pid = projectId.value
+  if (!pid) return
+  const seq = ++loadSeq
   loading.value = true
   try {
     const [list, gateInfo] = await Promise.all([
-      listAssumptions(projectId.value),
-      getAssumptionsGate(projectId.value),
+      listAssumptions(pid),
+      getAssumptionsGate(pid),
     ])
+    if (seq !== loadSeq) return
     assumptions.value = list
     gate.value = gateInfo
   } catch {
     // 拦截器已提示
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 

@@ -173,6 +173,7 @@ export function toFixRecord(row: Row): FixRecord {
 export function toRegressionItem(row: Row): RegressionItem {
   return {
     id: row.id,
+    projectId: row.projectId,
     itemId: row.itemId,
     text: row.text,
     checked: row.checked,

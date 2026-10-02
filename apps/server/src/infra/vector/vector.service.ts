@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config'
 import { mkdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { createRequire } from 'node:module'
+import { EMBEDDING_DIM } from '@specforge/shared'
 import { pseudoEmbedding } from '../../common/crypto.util'
 
 interface SqliteStatement {
@@ -34,6 +35,18 @@ export interface VectorHit {
 }
 
 /**
+ * 逐字节读取小端双精度数组。SQLite BLOB 的 byteOffset 不保证 8 字节对齐，
+ * 直接构造 Float64Array 视图会抛 RangeError，故手动解码规避对齐问题。
+ */
+function readDoubles(buffer: Buffer, length: number): number[] {
+  const out = new Array<number>(length)
+  for (let i = 0; i < length; i += 1) {
+    out[i] = buffer.readDoubleLE(i * 8)
+  }
+  return out
+}
+
+/**
  * 向量检索（PRD 8.1）：独立 SQLite 库，使用 Node 内置 node:sqlite，零外部依赖。
  * 采用词袋哈希伪 embedding + 余弦相似度暴力检索，适合平台侧契约/代码片段召回；
  * 接入真实 embedding 服务时只需替换 pseudoEmbedding 并调整 dim。
@@ -44,7 +57,7 @@ export class VectorService implements OnModuleDestroy {
   private db: SqliteDatabase | null = null
   private attempted = false
   private failedAt = 0
-  private readonly dim = 64
+  private readonly dim = EMBEDDING_DIM
   /** 初始化失败后的重试间隔，避免高频重试与日志刷屏 */
   private static readonly RETRY_INTERVAL_MS = 30_000
 
@@ -153,7 +166,7 @@ export class VectorService implements OnModuleDestroy {
     for (const row of rows) {
       // 维度不一致或 BLOB 长度不足时跳过，避免读到脏数据（D-7）
       if (row.dim !== this.dim || row.vector.byteLength < row.dim * 8) continue
-      const stored = new Float64Array(row.vector.buffer, row.vector.byteOffset, row.dim)
+      const stored = readDoubles(row.vector, row.dim)
       hits.push({
         ownerType: row.owner_type,
         ownerId: row.owner_id,

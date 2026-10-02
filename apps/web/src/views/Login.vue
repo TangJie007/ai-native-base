@@ -50,8 +50,10 @@ async function submit() {
       await auth.register(form.email, form.password, form.name || undefined)
       ElMessage.success('注册成功')
     }
-    const redirect = (route.query.redirect as string) || '/dashboard'
-    router.replace(redirect)
+    const raw = route.query.redirect
+    // query 参数可能是数组（?redirect=a&redirect=b），收敛为单个字符串
+    const redirect = typeof raw === 'string' ? raw : Array.isArray(raw) ? String(raw[0] ?? '') : ''
+    router.replace(redirect || '/dashboard')
   } catch {
     // 错误提示由 axios 拦截器统一处理
   } finally {

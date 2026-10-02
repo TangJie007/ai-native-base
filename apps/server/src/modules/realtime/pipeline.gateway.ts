@@ -11,6 +11,7 @@ import {
 } from '@nestjs/websockets'
 import type { Server, Socket } from 'socket.io'
 import type { AgentTrace, PipelineStatus, RequirementItem, SandboxFile } from '@specforge/shared'
+import { resolveCorsOrigins } from '../../config/configuration'
 import { ProjectsService } from '../projects/projects.service'
 
 interface WsJwtPayload {
@@ -28,7 +29,18 @@ interface WsJwtPayload {
  */
 @WebSocketGateway({
   namespace: '/ws',
-  cors: { origin: true, credentials: true },
+  cors: {
+    // 与 HTTP 侧共用白名单，避免 origin:true 放行任意站点携带凭证连接
+    origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+      const allowed = resolveCorsOrigins()
+      if (!origin || allowed.includes(origin)) {
+        callback(null, true)
+        return
+      }
+      callback(new Error(`CORS 拒绝来源：${origin}`))
+    },
+    credentials: true,
+  },
 })
 export class PipelineGateway implements OnGatewayConnection {
   private readonly logger = new Logger(PipelineGateway.name)

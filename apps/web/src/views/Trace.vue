@@ -59,16 +59,23 @@ function isExpanded(id: string) {
   return expanded.value.has(id)
 }
 
+// 请求序号：快速切换项目时丢弃过期响应
+let loadSeq = 0
+
 async function load() {
-  if (!projectId.value) return
+  const pid = projectId.value
+  if (!pid) return
+  const seq = ++loadSeq
   loading.value = true
   try {
-    data.value = await listTraces(projectId.value)
-    expanded.value = new Set(data.value.entries.slice(0, 1).map((e) => e.id))
+    const result = await listTraces(pid)
+    if (seq !== loadSeq) return
+    data.value = result
+    expanded.value = new Set(result.entries.slice(0, 1).map((e) => e.id))
   } catch {
-    data.value = null
+    if (seq === loadSeq) data.value = null
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 

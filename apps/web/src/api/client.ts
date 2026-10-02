@@ -49,10 +49,11 @@ instance.interceptors.response.use(
     }
 
     if (status === 401 || code === ErrorCode.UNAUTHORIZED) {
-      // 登录态失效：清 token 并跳登录页
+      // 登录态失效：清 token 并跳登录页，携带当前地址以便登录后回跳
       localStorage.removeItem(TOKEN_KEY)
       if (window.location.pathname !== '/login') {
-        window.location.href = '/login'
+        const back = encodeURIComponent(`${window.location.pathname}${window.location.search}`)
+        window.location.href = `/login?redirect=${back}`
       }
     } else if (!silent) {
       ElMessage.error(message)

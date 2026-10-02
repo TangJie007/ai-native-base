@@ -25,6 +25,7 @@ import {
   resolveItem,
   startPipeline,
   type ResolveAction,
+  type StartPipelinePayload,
 } from '@/api/pipeline'
 import { listItems } from '@/api/requirements'
 import { metaOf } from '@/utils/meta'
@@ -50,6 +51,9 @@ const items = ref<RequirementItem[]>([])
 const sandbox = ref<SandboxState | null>(null)
 const liveTraces = ref<AgentTrace[]>([])
 const connected = ref(false)
+// 启动参数（留空则使用服务端默认值）
+const startConcurrency = ref<number>()
+const startMaxFixRounds = ref<number>()
 
 let socket: Socket | null = null
 
@@ -92,22 +96,28 @@ const troubleItem = computed(
 
 /* ---------------- 数据加载 ---------------- */
 
+// 请求序号：快速切换项目时丢弃过期响应，避免旧数据覆盖新项目
+let loadSeq = 0
+
 async function load() {
-  if (!projectId.value) return
+  const pid = projectId.value
+  if (!pid) return
+  const seq = ++loadSeq
   loading.value = true
   try {
     const [pipelineInfo, itemList, sandboxInfo] = await Promise.all([
-      getPipeline(projectId.value),
-      listItems(projectId.value),
-      getSandbox(projectId.value).catch(() => null),
+      getPipeline(pid),
+      listItems(pid),
+      getSandbox(pid).catch(() => null),
     ])
+    if (seq !== loadSeq) return
     pipeline.value = pipelineInfo
     items.value = itemList
     sandbox.value = sandboxInfo
   } catch {
     // 拦截器已提示
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 
@@ -115,7 +125,10 @@ async function start() {
   if (!projectId.value) return
   starting.value = true
   try {
-    pipeline.value = await startPipeline(projectId.value)
+    const payload: StartPipelinePayload = {}
+    if (startConcurrency.value) payload.concurrency = startConcurrency.value
+    if (startMaxFixRounds.value) payload.maxFixRounds = startMaxFixRounds.value
+    pipeline.value = await startPipeline(projectId.value, payload)
     ElMessage.success('生成流水线已启动')
     await load()
   } catch {
@@ -185,7 +198,7 @@ function rowClassName({ row }: { row: RequirementItem }) {
 
 // 过滤非当前项目的事件（房间订阅已隔离，此处防御性再校验一次）
 function sameProject(pid?: string | null) {
-  return !pid || pid === projectId.value
+  return pid === projectId.value
 }
 
 // 订阅当前项目房间（服务端会校验项目归属）
@@ -220,7 +233,8 @@ function connectSocket() {
     connected.value = false
   })
   // 断线重连后重新订阅并拉取最新状态，补齐断连期间丢失的事件
-  socket.on('reconnect', () => {
+  // 注意：reconnect 是 Manager(socket.io) 事件，不是 socket 事件
+  socket.io.on('reconnect', () => {
     subscribe()
     void load()
   })
@@ -261,10 +275,17 @@ onUnmounted(() => {
 })
 
 watch(projectId, (id) => {
-  if (!id) return
+  // 切换项目：先清空上一项目的实时轨迹与状态，避免残留
+  liveTraces.value = []
+  if (!id) {
+    pipeline.value = null
+    items.value = []
+    sandbox.value = null
+    return
+  }
   if (!socket) connectSocket()
   subscribe()
-  load()
+  void load()
 })
 </script>
 
@@ -324,6 +345,26 @@ watch(projectId, (id) => {
           <span class="flex items-center gap-1.5 text-[12px]" :class="connected ? 'text-brand-deep' : 'text-txt-faint'">
             <el-icon :size="12"><Connection /></el-icon>{{ connected ? '实时连接已建立' : '实时连接断开' }}
           </span>
+          <template v-if="!pipeline?.running">
+            <el-input-number
+              v-model="startConcurrency"
+              :min="1"
+              :max="8"
+              size="small"
+              controls-position="right"
+              class="!w-24"
+              placeholder="并发"
+            />
+            <el-input-number
+              v-model="startMaxFixRounds"
+              :min="0"
+              :max="10"
+              size="small"
+              controls-position="right"
+              class="!w-24"
+              placeholder="修复轮次"
+            />
+          </template>
           <el-button
             v-if="pipeline?.running"
             size="small"

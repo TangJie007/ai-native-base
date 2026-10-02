@@ -32,18 +32,24 @@ const fileInput = ref<HTMLInputElement | null>(null)
 
 const onboarding = computed(() => route.query.onboarding === '1')
 
+// 请求序号：快速切换项目时丢弃过期响应
+let loadSeq = 0
+
 async function load() {
-  if (!projectId.value) return
+  const pid = projectId.value
+  if (!pid) return
+  const seq = ++loadSeq
   loading.value = true
   try {
-    const payload = await getRequirements(projectId.value)
+    const payload = await getRequirements(pid)
+    if (seq !== loadSeq) return
     doc.value = payload.doc
     spec.value = payload.spec
     items.value = payload.items
   } catch {
     // 拦截器已提示
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 

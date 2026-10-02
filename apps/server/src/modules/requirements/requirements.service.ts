@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common'
 import {
+  EMBEDDING_MODEL_ID,
   ErrorCode,
   type Assumption,
   type CreateItemDto,
@@ -86,7 +87,6 @@ export class RequirementsService {
       where: { projectId },
       orderBy: { version: 'desc' },
     })
-    const version = (lastDoc?.version ?? 0) + 1
 
     // 重新导入即整体替换：条目与假设都以上一版为准重新生成
     const usedCodes = new Set<string>()
@@ -114,8 +114,23 @@ export class RequirementsService {
       },
     }
 
+    // 重新导入即整体替换：失效的旧契约须一并清除，否则已锁契约会让新需求永久无法生成契约，
+    // 且 S4 会继续使用与当前需求不匹配的过期契约
+    const staleContracts = await this.prisma.contract.findMany({
+      where: { projectId },
+      select: { id: true },
+    })
+
     // 整体替换须原子完成：任一步失败都回滚，避免条目/假设/文档版本错位（B-4）
     const doc = await this.prisma.$transaction(async (tx) => {
+      // 版本号在事务内读取，配合 [projectId, version] 唯一约束避免并发导入写入重复版本
+      const latest = await tx.requirementDoc.findFirst({
+        where: { projectId },
+        orderBy: { version: 'desc' },
+        select: { version: true },
+      })
+      const version = (latest?.version ?? 0) + 1
+      await tx.contract.deleteMany({ where: { projectId } })
       await tx.itemDependency.deleteMany({ where: { projectId } })
       await tx.assumption.deleteMany({ where: { projectId } })
       await tx.requirementItem.deleteMany({ where: { projectId } })
@@ -154,12 +169,16 @@ export class RequirementsService {
       return createdDoc
     })
 
+    // 清理上一版需求文档与已失效契约的向量，避免召回命中过期内容（向量库在 SQLite，事务外执行）
+    if (lastDoc) this.vectors.removeByOwner('requirement_doc', lastDoc.id)
+    for (const stale of staleContracts) this.vectors.removeByOwner('contract', stale.id)
+
     // 落到向量库，供后续契约/代码生成做相似片段召回（PRD 8.1）
     this.vectors.upsert({
       ownerType: 'requirement_doc',
       ownerId: doc.id,
       projectId,
-      model: 'pseudo-bow-64',
+      model: EMBEDDING_MODEL_ID,
       text: dto.content,
     })
 
@@ -224,10 +243,13 @@ export class RequirementsService {
     if (project?.status === 'generating') {
       throw conflict(ErrorCode.PIPELINE_ALREADY_RUNNING, { projectId: item.projectId })
     }
-    await this.prisma.itemDependency.deleteMany({
-      where: { OR: [{ itemId }, { dependsOnId: itemId }] },
+    // 边与条目必须一并删除，否则残留边会指向已删除条目（M5）
+    await this.prisma.$transaction(async (tx) => {
+      await tx.itemDependency.deleteMany({
+        where: { OR: [{ itemId }, { dependsOnId: itemId }] },
+      })
+      await tx.requirementItem.delete({ where: { id: itemId } })
     })
-    await this.prisma.requirementItem.delete({ where: { id: itemId } })
   }
 
   async projectIdOfItem(itemId: string): Promise<string> {
