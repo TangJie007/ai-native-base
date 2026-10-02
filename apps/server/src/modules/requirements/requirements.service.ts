@@ -1,14 +1,16 @@
 import { Injectable } from '@nestjs/common'
-import type {
-  Assumption,
-  CreateItemDto,
-  ImportRequirementDocDto,
-  ParsedSpec,
-  RequirementDoc,
-  RequirementItem,
-  StackConfig,
-  UpdateItemDto,
+import {
+  ErrorCode,
+  type Assumption,
+  type CreateItemDto,
+  type ImportRequirementDocDto,
+  type ParsedSpec,
+  type RequirementDoc,
+  type RequirementItem,
+  type StackConfig,
+  type UpdateItemDto,
 } from '@specforge/shared'
+import { conflict } from '../../common/app-exception'
 import { toAssumption, toRequirementDoc, toRequirementItem, type Row } from '../../common/mappers'
 import { LlmService } from '../../infra/llm/llm.service'
 import { VectorService } from '../../infra/vector/vector.service'
@@ -65,9 +67,14 @@ export class RequirementsService {
     const stackConfig = project.stackConfig as StackConfig
 
     const parsed = await this.traces.track(
-      { projectId, action: 'S1 需求解析', inputSummary: `${dto.fileName}（${dto.content.length} 字）` },
+      {
+        projectId,
+        action: 'S1 需求解析',
+        inputSummary: `${dto.fileName}（${dto.content.length} 字）`,
+        agent: 'parser',
+      },
       () =>
-        this.llm.parseRequirement({
+        this.llm.parseRequirement(userId, {
           content: dto.content,
           fileName: dto.fileName,
           projectName: project.name,
@@ -82,10 +89,6 @@ export class RequirementsService {
     const version = (lastDoc?.version ?? 0) + 1
 
     // 重新导入即整体替换：条目与假设都以上一版为准重新生成
-    await this.prisma.itemDependency.deleteMany({ where: { projectId } })
-    await this.prisma.assumption.deleteMany({ where: { projectId } })
-    await this.prisma.requirementItem.deleteMany({ where: { projectId } })
-
     const usedCodes = new Set<string>()
     const itemRows = parsed.items.map((item, index) => {
       const code = this.uniqueCode(item.code, index, usedCodes)
@@ -101,7 +104,6 @@ export class RequirementsService {
         status: 'pending',
       }
     })
-    await this.prisma.requirementItem.createMany({ data: itemRows })
 
     const spec: ParsedSpec = {
       ...parsed.spec,
@@ -112,34 +114,44 @@ export class RequirementsService {
       },
     }
 
-    const doc = await this.prisma.requirementDoc.create({
-      data: {
-        projectId,
-        version,
-        fileName: dto.fileName,
-        rawContent: dto.content,
-        parsedSpec: spec as unknown as object,
-      },
-    })
+    // 整体替换须原子完成：任一步失败都回滚，避免条目/假设/文档版本错位（B-4）
+    const doc = await this.prisma.$transaction(async (tx) => {
+      await tx.itemDependency.deleteMany({ where: { projectId } })
+      await tx.assumption.deleteMany({ where: { projectId } })
+      await tx.requirementItem.deleteMany({ where: { projectId } })
+      await tx.requirementItem.createMany({ data: itemRows })
 
-    if (parsed.assumptions.length > 0) {
-      await this.prisma.assumption.createMany({
-        data: parsed.assumptions.map((assumption) => ({
-          docId: doc.id,
+      const createdDoc = await tx.requirementDoc.create({
+        data: {
           projectId,
-          code: assumption.code,
-          category: assumption.category,
-          question: assumption.question,
-          aiDefault: assumption.aiDefault,
-          impact: assumption.impact,
-          status: 'pending',
-        })),
+          version,
+          fileName: dto.fileName,
+          rawContent: dto.content,
+          parsedSpec: spec as unknown as object,
+        },
       })
-    }
 
-    await this.prisma.project.update({
-      where: { id: projectId },
-      data: { status: 'awaiting_assumptions', currentStage: 'S1', depsConfirmed: false },
+      if (parsed.assumptions.length > 0) {
+        await tx.assumption.createMany({
+          data: parsed.assumptions.map((assumption) => ({
+            docId: createdDoc.id,
+            projectId,
+            code: assumption.code,
+            category: assumption.category,
+            question: assumption.question,
+            aiDefault: assumption.aiDefault,
+            impact: assumption.impact,
+            status: 'pending',
+          })),
+        })
+      }
+
+      await tx.project.update({
+        where: { id: projectId },
+        data: { status: 'awaiting_assumptions', currentStage: 'S1', depsConfirmed: false },
+      })
+
+      return createdDoc
     })
 
     // 落到向量库，供后续契约/代码生成做相似片段召回（PRD 8.1）
@@ -205,6 +217,13 @@ export class RequirementsService {
   }
 
   async removeItem(itemId: string): Promise<void> {
+    const item = await this.prisma.requirementItem.findUnique({ where: { id: itemId } })
+    if (!item) return
+    // 流水线执行中禁止删除条目，避免与生成/校验竞态（B-14）
+    const project = await this.prisma.project.findUnique({ where: { id: item.projectId } })
+    if (project?.status === 'generating') {
+      throw conflict(ErrorCode.PIPELINE_ALREADY_RUNNING, { projectId: item.projectId })
+    }
     await this.prisma.itemDependency.deleteMany({
       where: { OR: [{ itemId }, { dependsOnId: itemId }] },
     })

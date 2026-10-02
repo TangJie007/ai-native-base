@@ -1,7 +1,8 @@
-import { Module } from '@nestjs/common'
+import { Controller, Get, Module } from '@nestjs/common'
 import { ConfigModule } from '@nestjs/config'
 import { APP_GUARD } from '@nestjs/core'
 import { JwtAuthGuard } from './common/jwt-auth.guard'
+import { Public } from './common/public.decorator'
 import configuration from './config/configuration'
 import { LlmModule } from './infra/llm/llm.module'
 import { SandboxModule } from './infra/sandbox/sandbox.module'
@@ -18,6 +19,16 @@ import { SandboxHttpModule } from './modules/sandbox/sandbox.module'
 import { SettingsModule } from './modules/settings/settings.module'
 import { TracesModule } from './modules/traces/traces.module'
 import { PrismaModule } from './prisma/prisma.module'
+
+@Controller()
+class HealthController {
+  /** 健康探针：仅供存活/就绪检测，无需鉴权（B-13） */
+  @Public()
+  @Get('health')
+  health() {
+    return { status: 'ok', uptime: Math.round(process.uptime()) }
+  }
+}
 
 @Module({
   imports: [
@@ -41,6 +52,7 @@ import { PrismaModule } from './prisma/prisma.module'
     SettingsModule,
     SandboxHttpModule,
   ],
+  controllers: [HealthController],
   providers: [
     // 默认全局鉴权：除 @Public() 外一律要求 Bearer JWT
     { provide: APP_GUARD, useClass: JwtAuthGuard },

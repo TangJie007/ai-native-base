@@ -40,6 +40,13 @@ instance.interceptors.response.use(
     const code = payload?.code
     const message = payload?.message || error.message || '请求失败'
     const silent = error.config?.silent
+    // 登录/注册接口的 401 属于业务校验失败（账号或密码错误），需直接提示而非跳转
+    const isAuthEndpoint = /\/auth\/(login|register)/.test(error.config?.url ?? '')
+
+    if (isAuthEndpoint) {
+      if (!silent) ElMessage.error(message)
+      return Promise.reject(error)
+    }
 
     if (status === 401 || code === ErrorCode.UNAUTHORIZED) {
       // 登录态失效：清 token 并跳登录页

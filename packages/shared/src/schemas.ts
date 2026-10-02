@@ -101,8 +101,9 @@ export type SaveDependenciesDto = z.infer<typeof saveDependenciesSchema>
 /* ---------------- pipeline ---------------- */
 
 export const startPipelineSchema = z.object({
-  concurrency: z.number().int().min(1).max(10).optional().default(3),
-  maxFixRounds: z.number().int().min(0).max(10).optional().default(3),
+  // 不设默认值：缺省时由服务端按配置（pipelineConcurrency / pipelineMaxFixRounds）回落（B-15）
+  concurrency: z.number().int().min(1).max(10).optional(),
+  maxFixRounds: z.number().int().min(0).max(10).optional(),
 })
 export type StartPipelineDto = z.infer<typeof startPipelineSchema>
 

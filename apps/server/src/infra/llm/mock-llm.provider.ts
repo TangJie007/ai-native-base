@@ -12,6 +12,7 @@ import {
   type RequirementItem,
 } from '@specforge/shared'
 import type {
+  FixAttempt,
   GeneratedAssumption,
   GeneratedContract,
   GeneratedDependency,
@@ -228,9 +229,11 @@ export class MockLlmProvider implements LlmProvider {
     error: { message: string; checkType: string; round: number; output: string }
     files: GeneratedFile[]
     round: number
+    history: FixAttempt[]
   }): Promise<{ result: GeneratedFix; usage: LlmUsage }> {
     // Mock 修复：在文件头部补一条修复说明，模拟「已定位并修正」。
-    const note = `// [fix round ${input.round}] 已根据「${input.error.message}」修正 ${input.item.code}\n`
+    const tried = input.history.length > 0 ? `（已尝试 ${input.history.length} 轮）` : ''
+    const note = `// [fix round ${input.round}] 已根据「${input.error.message}」修正 ${input.item.code}${tried}\n`
     const files = input.files.map((file) => ({ ...file, content: note + file.content }))
     const patch = `--- a/${input.item.code}\n+++ b/${input.item.code}\n+ ${note.trim()}\n`
 

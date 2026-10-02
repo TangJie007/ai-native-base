@@ -1,6 +1,7 @@
 import type {
   FixRecord,
   PipelineStatus,
+  RegressionItem,
   RequirementItem,
   VerificationRun,
 } from '@specforge/shared'
@@ -9,6 +10,12 @@ import { request } from './client'
 export interface StartPipelinePayload {
   concurrency?: number
   maxFixRounds?: number
+}
+
+export interface CheckRegressionPayload {
+  itemId: string
+  text: string
+  checked: boolean
 }
 
 export type ResolveAction = 'retry' | 'skip' | 'mark_passed'
@@ -49,4 +56,17 @@ export function getVerifications(itemId: string): Promise<VerificationRun[]> {
 /** 条目的修复记录 */
 export function getFixes(itemId: string): Promise<FixRecord[]> {
   return request.get<FixRecord[]>(`/items/${itemId}/fixes`)
+}
+
+/** 人工回归清单（卡点四） */
+export function getRegression(projectId: string): Promise<RegressionItem[]> {
+  return request.get<RegressionItem[]>(`/projects/${projectId}/regression`)
+}
+
+/** 勾选/取消勾选回归项；全部勾选后服务端将项目置为 delivered */
+export function checkRegression(
+  projectId: string,
+  payload: CheckRegressionPayload,
+): Promise<PipelineStatus> {
+  return request.patch<PipelineStatus>(`/projects/${projectId}/regression/check`, payload)
 }

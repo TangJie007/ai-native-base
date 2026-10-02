@@ -12,6 +12,7 @@ import {
   type ErrorSnapshot,
   type ExecutionBatch,
   type FixRecord,
+  type ItemStatus,
   type PipelineStatus,
   type RegressionItem,
   type RequirementItem,
@@ -31,7 +32,7 @@ import {
   toVerificationRun,
   type Row,
 } from '../../common/mappers'
-import type { GeneratedFile } from '../../infra/llm/llm.types'
+import type { FixAttempt, GeneratedFile } from '../../infra/llm/llm.types'
 import { LlmService } from '../../infra/llm/llm.service'
 import { SandboxService } from '../../infra/sandbox/sandbox.service'
 import type { SandboxCheckResult } from '../../infra/sandbox/sandbox.types'
@@ -62,6 +63,8 @@ export class PipelineService {
   private readonly active = new Set<string>()
   /** 收到中断请求的项目，在批次边界停下 */
   private readonly interrupted = new Set<string>()
+  /** 流水线运行期间提交的重跑请求，待本轮结束后唤醒执行（B-2） */
+  private readonly pendingRetries = new Map<string, Set<string>>()
 
   constructor(
     private readonly prisma: PrismaService,
@@ -115,51 +118,59 @@ export class PipelineService {
   async start(userId: string, projectId: string, dto: StartPipelineDto): Promise<PipelineStatus> {
     if (this.active.has(projectId)) throw conflict(ErrorCode.PIPELINE_ALREADY_RUNNING, { projectId })
 
-    const project = await this.projects.assertOwned(userId, projectId)
-
-    // 三个强阻断卡点必须全部通过（PRD 6.1）
-    const gate = await this.assumptions.gate(projectId)
-    if (!gate.allowed) throw conflict(ErrorCode.ASSUMPTIONS_PENDING, gate)
-
-    const contract = await this.contracts.lockedContract(projectId)
-    if (!contract) throw conflict(ErrorCode.CONTRACT_NOT_LOCKED, { projectId })
-
-    if (!project.depsConfirmed) throw conflict(ErrorCode.DEPENDENCIES_NOT_CONFIRMED, { projectId })
-
-    const itemCount = await this.prisma.requirementItem.count({ where: { projectId } })
-    if (itemCount === 0) throw conflict(ErrorCode.NO_REQUIREMENT_ITEMS, { projectId })
-
-    const concurrency =
-      dto.concurrency ?? this.config.get<number>('pipelineConcurrency') ?? DEFAULT_CONCURRENCY
-    const maxFixRounds =
-      dto.maxFixRounds ?? this.config.get<number>('maxFixRounds') ?? DEFAULT_MAX_FIX_ROUNDS
-
-    await this.prisma.pipelineRun.updateMany({
-      where: { projectId, running: true },
-      data: { running: false, finishedAt: new Date() },
-    })
-    await this.prisma.pipelineRun.create({
-      data: { projectId, running: true, currentStage: 'S4', concurrency, maxFixRounds },
-    })
-    await this.prisma.requirementItem.updateMany({
-      where: { projectId },
-      data: { status: 'pending', retryCount: 0, errorSnapshot: Prisma.DbNull },
-    })
-    await this.prisma.project.update({
-      where: { id: projectId },
-      data: { status: 'generating', currentStage: 'S4' },
-    })
-
+    // 先占位再加锁：避免后续 await 窗口内并发重复启动同一项目
     this.active.add(projectId)
-    this.interrupted.delete(projectId)
-    await this.emitStatus(projectId)
+    try {
+      const project = await this.projects.assertOwned(userId, projectId)
 
-    // 后台执行，接口立即返回最新状态，进度经 WebSocket 推送
-    void this.runAll(projectId, { concurrency, maxFixRounds }).catch((error) => {
-      this.logger.error(`流水线执行失败 ${projectId}：${messageOf(error)}`)
-    })
+      // 三个强阻断卡点必须全部通过（PRD 6.1）
+      const gate = await this.assumptions.gate(projectId)
+      if (!gate.allowed) throw conflict(ErrorCode.ASSUMPTIONS_PENDING, gate)
 
-    return this.buildStatus(projectId)
+      const contract = await this.contracts.lockedContract(projectId)
+      if (!contract) throw conflict(ErrorCode.CONTRACT_NOT_LOCKED, { projectId })
+
+      if (!project.depsConfirmed) throw conflict(ErrorCode.DEPENDENCIES_NOT_CONFIRMED, { projectId })
+
+      const itemCount = await this.prisma.requirementItem.count({ where: { projectId } })
+      if (itemCount === 0) throw conflict(ErrorCode.NO_REQUIREMENT_ITEMS, { projectId })
+
+      const concurrency =
+        dto.concurrency ?? this.config.get<number>('pipelineConcurrency') ?? DEFAULT_CONCURRENCY
+      const maxFixRounds =
+        dto.maxFixRounds ?? this.config.get<number>('maxFixRounds') ?? DEFAULT_MAX_FIX_ROUNDS
+
+      await this.prisma.pipelineRun.updateMany({
+        where: { projectId, running: true },
+        data: { running: false, finishedAt: new Date() },
+      })
+      await this.prisma.pipelineRun.create({
+        data: { projectId, running: true, currentStage: 'S4', concurrency, maxFixRounds },
+      })
+      await this.prisma.requirementItem.updateMany({
+        where: { projectId },
+        data: { status: 'pending', retryCount: 0, errorSnapshot: Prisma.DbNull },
+      })
+      await this.prisma.project.update({
+        where: { id: projectId },
+        data: { status: 'generating', currentStage: 'S4' },
+      })
+
+      this.interrupted.delete(projectId)
+      await this.emitStatus(projectId)
+
+      // 后台执行，接口立即返回最新状态，进度经 WebSocket 推送
+      void this.runAll(projectId, { concurrency, maxFixRounds }).catch((error) => {
+        this.logger.error(`流水线执行失败 ${projectId}：${messageOf(error)}`)
+        // 兜底释放占位，避免异常路径下项目被永久锁死
+        this.active.delete(projectId)
+      })
+
+      return this.buildStatus(projectId)
+    } catch (error) {
+      this.active.delete(projectId)
+      throw error
+    }
   }
 
   async interrupt(userId: string, projectId: string): Promise<PipelineStatus> {
@@ -176,7 +187,8 @@ export class PipelineService {
   async resolveItem(userId: string, itemId: string, dto: ResolveItemDto): Promise<RequirementItem> {
     const item = await this.projects.assertItemOwned(userId, itemId)
     const status = item.status as RequirementItem['status']
-    if (!['failed', 'needs_human', 'passed'].includes(status)) {
+    // blocked 条目（依赖未通过被阻断）也允许人工重跑（B-9）
+    if (!['failed', 'needs_human', 'passed', 'blocked'].includes(status)) {
       throw conflict(ErrorCode.ITEM_NOT_RESOLVABLE, { status })
     }
 
@@ -186,8 +198,10 @@ export class PipelineService {
         retryCount: 0,
         errorSnapshot: Prisma.DbNull,
       })
-      // 流水线空闲时单条目重跑
-      if (!this.active.has(item.projectId)) {
+      if (this.active.has(item.projectId)) {
+        // 流水线运行中：登记待唤醒，本轮结束后自动重跑，避免请求静默失效（B-2）
+        this.queueRetry(item.projectId, itemId)
+      } else {
         void this.runSingle(item.projectId, itemId).catch((error) =>
           this.logger.error(`单条目重跑失败 ${itemId}：${messageOf(error)}`),
         )
@@ -241,14 +255,24 @@ export class PipelineService {
     const byId = new Map(itemRows.map((row) => [row.id, row]))
 
     let batches: ExecutionBatch[]
+    // 条目 → 其依赖集合，用于依赖未通过时阻断下游条目（B-9）
+    const depsOf = new Map<string, Set<string>>()
     try {
       const graph = await this.dependencies.get(projectId)
       batches = graph.batches
+      for (const edge of graph.edges) {
+        const set = depsOf.get(edge.itemId) ?? new Set<string>()
+        set.add(edge.dependsOnId)
+        depsOf.set(edge.itemId, set)
+      }
     } catch (error) {
       this.logger.warn(`依赖图读取失败，退化为单批并行：${messageOf(error)}`)
       batches = [this.singleBatch(itemRows)]
     }
     if (batches.length === 0) batches = [this.singleBatch(itemRows)]
+
+    // 运行期状态镜像：批次按拓扑排序，下游可据此判断依赖是否已通过
+    const statusById = new Map<string, ItemStatus>(itemRows.map((row) => [row.id, 'pending']))
 
     let interrupted = false
     try {
@@ -260,11 +284,23 @@ export class PipelineService {
           }
           const slice = batch.nodes.slice(index, index + ctx.concurrency)
           await Promise.all(
-            slice.map((node) => {
+            slice.map(async (node) => {
               const item = byId.get(node.id)
-              return item
-                ? this.processItem(project as unknown as Row, item as unknown as Row, contract, ctx)
-                : Promise.resolve()
+              if (!item) return
+              const deps = depsOf.get(node.id)
+              if (deps && [...deps].some((depId) => statusById.get(depId) !== 'passed')) {
+                // 依赖未通过：标记 blocked，不生成代码，避免产出不可用产物（B-9）
+                const blocked = await this.updateItem(item.id, { status: 'blocked' })
+                statusById.set(item.id, blocked.status as ItemStatus)
+                return
+              }
+              const status = await this.processItem(
+                project as unknown as Row,
+                item as unknown as Row,
+                contract,
+                ctx,
+              )
+              statusById.set(item.id, status)
             }),
           )
         }
@@ -275,6 +311,7 @@ export class PipelineService {
       await this.finish(projectId, false, true)
       this.interrupted.delete(projectId)
       this.active.delete(projectId)
+      await this.drainPendingRetries(projectId)
       return
     }
 
@@ -282,6 +319,7 @@ export class PipelineService {
     this.interrupted.delete(projectId)
     this.active.delete(projectId)
     await this.finish(projectId, wasInterrupted || interrupted, false)
+    await this.drainPendingRetries(projectId)
   }
 
   private async processItem(
@@ -289,7 +327,7 @@ export class PipelineService {
     item: Row,
     contract: Contract | null,
     ctx: RunContext,
-  ): Promise<void> {
+  ): Promise<ItemStatus> {
     try {
       await this.updateItem(item.id, { status: 'generating' })
 
@@ -299,9 +337,10 @@ export class PipelineService {
           itemId: item.id,
           action: `S4 代码生成 ${item.code}`,
           inputSummary: item.title,
+          agent: item.layer === 'frontend' ? 'frontend' : 'backend',
         },
         () =>
-          this.llm.generateItemCode({
+          this.llm.generateItemCode(project.userId as string, {
             item: toRequirementItem(item),
             contract,
             stackConfig: project.stackConfig as StackConfig,
@@ -314,7 +353,7 @@ export class PipelineService {
         filePaths: stored.map((file) => file.path) as unknown as object,
       })
 
-      await this.verifyAndFix(project, item, files, ctx)
+      return await this.verifyAndFix(project, item, files, ctx)
     } catch (error) {
       // 单条目失败不影响其它条目（PRD 7.2 失败不阻塞）
       await this.updateItem(item.id, {
@@ -323,6 +362,7 @@ export class PipelineService {
       }).catch((updateError) =>
         this.logger.error(`条目失败状态写入异常 ${item.code}：${messageOf(updateError)}`),
       )
+      return 'failed'
     }
   }
 
@@ -331,9 +371,11 @@ export class PipelineService {
     item: Row,
     files: GeneratedFile[],
     ctx: RunContext,
-  ): Promise<void> {
+  ): Promise<ItemStatus> {
     let currentFiles = files
     let round = 0
+    // 累计各轮修复尝试，供下一轮参考，避免重复无效方案（PRD 7.2）
+    const history: FixAttempt[] = []
 
     for (;;) {
       await this.updateItem(item.id, { status: 'verifying' })
@@ -354,12 +396,12 @@ export class PipelineService {
           retryCount: round,
           errorSnapshot: Prisma.DbNull,
         })
-        return
+        return 'passed'
       }
 
       if (round >= ctx.maxFixRounds) {
         await this.markNeedsHuman(item.id, round, blocking)
-        return
+        return 'needs_human'
       }
 
       round += 1
@@ -376,13 +418,15 @@ export class PipelineService {
           itemId: item.id,
           action: `S5 修复 ${item.code} 第 ${round} 轮`,
           inputSummary: errorSnapshot.message,
+          agent: 'fixer',
         },
         () =>
-          this.llm.fixError({
+          this.llm.fixError(project.userId as string, {
             item: toRequirementItem(item),
             error: errorSnapshot,
             files: currentFiles,
             round,
+            history: [...history],
           }),
       )
 
@@ -393,6 +437,13 @@ export class PipelineService {
         filePaths: stored.map((file) => file.path) as unknown as object,
       })
       await this.persistFix(item.id, round, errorSnapshot, fix.patch, 'success')
+      history.push({
+        round,
+        checkType: blocking.checkType,
+        message: errorSnapshot.message,
+        output: errorSnapshot.output,
+        patch: fix.patch,
+      })
     }
   }
 
@@ -434,6 +485,29 @@ export class PipelineService {
     } finally {
       this.active.delete(projectId)
       await this.emitStatus(projectId)
+      await this.drainPendingRetries(projectId)
+    }
+  }
+
+  /** 登记运行期间的重跑请求（B-2） */
+  private queueRetry(projectId: string, itemId: string): void {
+    const set = this.pendingRetries.get(projectId) ?? new Set<string>()
+    set.add(itemId)
+    this.pendingRetries.set(projectId, set)
+  }
+
+  /** 流水线空闲后唤醒期间登记的重跑条目（B-2） */
+  private async drainPendingRetries(projectId: string): Promise<void> {
+    const items = this.pendingRetries.get(projectId)
+    if (!items || items.size === 0) return
+    // 先清空再执行，避免 runSingle 内部再次触发时重复处理
+    this.pendingRetries.delete(projectId)
+    for (const itemId of items) {
+      try {
+        await this.runSingle(projectId, itemId)
+      } catch (error) {
+        this.logger.error(`唤醒重跑失败 ${itemId}：${messageOf(error)}`)
+      }
     }
   }
 
@@ -473,11 +547,13 @@ export class PipelineService {
     let passed = 0
     let failed = 0
     let needsHuman = 0
+    let blocked = 0
     let inFlight = 0
     for (const item of items) {
       if (item.status === 'passed') passed += 1
       else if (item.status === 'failed') failed += 1
       else if (item.status === 'needs_human') needsHuman += 1
+      else if (item.status === 'blocked') blocked += 1
       else if (['generating', 'verifying', 'fixing'].includes(item.status)) inFlight += 1
     }
 
@@ -489,7 +565,7 @@ export class PipelineService {
       concurrency,
       maxFixRounds,
       regressionChecklist: regression.map((row) => toRegressionItem(row as unknown as Row)),
-      summary: `共 ${items.length} 条：通过 ${passed}，失败 ${failed}，待人工 ${needsHuman}，进行中 ${inFlight}`,
+      summary: `共 ${items.length} 条：通过 ${passed}，失败 ${failed}，待人工 ${needsHuman}，阻塞 ${blocked}，进行中 ${inFlight}`,
     }
   }
 
@@ -571,19 +647,24 @@ export class PipelineService {
 
   /** 生成人工回归清单：以条目验收标准为检查项（PRD 3.4 VER-08） */
   private async buildRegression(projectId: string): Promise<void> {
-    const existing = await this.prisma.regressionItem.count({ where: { projectId } })
-    if (existing > 0) return
-
     const items = await this.prisma.requirementItem.findMany({
       where: { projectId, status: { in: ['passed', 'failed', 'needs_human'] } },
       orderBy: { code: 'asc' },
     })
-    const data: { projectId: string; itemId: string; text: string }[] = []
+    // 重建而非跳过：新增/变更条目需同步进回归清单（B-3）；同内容的已勾选状态予以保留
+    const existing = await this.prisma.regressionItem.findMany({ where: { projectId } })
+    const checkedMap = new Map(existing.map((row) => [`${row.itemId}|${row.text}`, row.checked]))
+
+    const data: { projectId: string; itemId: string; text: string; checked: boolean }[] = []
     for (const item of items) {
       const acceptance = (item.acceptance as string[] | null) ?? []
       const checks = acceptance.length > 0 ? acceptance : [`${item.title} 功能正常`]
-      for (const text of checks) data.push({ projectId, itemId: item.id, text })
+      for (const text of checks) {
+        data.push({ projectId, itemId: item.id, text, checked: checkedMap.get(`${item.id}|${text}`) ?? false })
+      }
     }
+
+    await this.prisma.regressionItem.deleteMany({ where: { projectId } })
     if (data.length > 0) await this.prisma.regressionItem.createMany({ data })
   }
 

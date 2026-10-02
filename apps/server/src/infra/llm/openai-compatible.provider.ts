@@ -2,6 +2,7 @@ import { Logger } from '@nestjs/common'
 import { ErrorCode, type Contract, type ParsedSpec, type RequirementItem, type StackConfig } from '@specforge/shared'
 import { AppException } from '../../common/app-exception'
 import type {
+  FixAttempt,
   GeneratedContract,
   GeneratedDependency,
   GeneratedFile,
@@ -104,11 +105,18 @@ export class OpenAiCompatibleProvider implements LlmProvider {
     error: { message: string; checkType: string; round: number; output: string }
     files: GeneratedFile[]
     round: number
+    history: FixAttempt[]
   }): Promise<{ result: GeneratedFix; usage: LlmUsage }> {
+    const historyText =
+      input.history.length > 0
+        ? input.history
+            .map((attempt) => `第 ${attempt.round} 轮（${attempt.checkType}）：${attempt.message}\n${attempt.patch}`)
+            .join('\n---\n')
+        : '无'
     const { result, usage } = await this.chatJson<GeneratedFix>(
       input.model,
-      '你是修复 Agent。依据报错信息修复代码，严格输出 JSON：{patch,files:[{path,content}]}。patch 为 unified diff 文本，files 为修复后的完整文件。',
-      `报错检查项：${input.error.checkType}\n报错信息：${input.error.message}\n错误输出：${input.error.output}\n当前文件：${JSON.stringify(
+      '你是修复 Agent。依据报错信息修复代码，严格输出 JSON：{patch,files:[{path,content}]}。patch 为 unified diff 文本，files 为修复后的完整文件。务必参考历史修复记录，避免重复无效改动。',
+      `报错检查项：${input.error.checkType}\n报错信息：${input.error.message}\n错误输出：${input.error.output}\n历史修复记录：${historyText}\n当前文件：${JSON.stringify(
         input.files,
       )}`,
     )

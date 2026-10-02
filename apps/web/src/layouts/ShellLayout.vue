@@ -2,6 +2,8 @@
 import { computed, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
+  Box,
+  CircleCheck,
   Cpu,
   Document,
   Folder,
@@ -44,6 +46,8 @@ const groups: { title: string; items: NavItem[] }[] = [
       { name: 'contract', label: '契约锁定', icon: MagicStick },
       { name: 'dependencies', label: '依赖编排', icon: Share },
       { name: 'pipeline', label: '生成监控', icon: Cpu },
+      { name: 'regression', label: '人工回归', icon: CircleCheck },
+      { name: 'sandbox', label: '沙箱预览', icon: Box },
     ],
   },
   {

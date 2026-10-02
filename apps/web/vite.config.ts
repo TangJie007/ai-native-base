@@ -17,6 +17,12 @@ export default defineConfig({
         target: 'http://localhost:3000',
         changeOrigin: true,
       },
+      // WebSocket 握手路径（namespace /ws 仍走默认 /socket.io）
+      '/socket.io': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+        ws: true,
+      },
     },
   },
 })

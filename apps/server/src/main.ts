@@ -10,10 +10,22 @@ async function bootstrap(): Promise<void> {
 
   // 统一 API 前缀：/api/...
   app.setGlobalPrefix('api')
-  app.enableCors({ origin: true, credentials: true })
-  app.useGlobalFilters(new AllExceptionsFilter())
 
   const config = app.get(ConfigService)
+  // CORS 白名单：仅允许配置的来源，避免任意站点携带凭证访问
+  const allowedOrigins = config.get<string[]>('corsOrigins') ?? []
+  app.enableCors({
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true)
+        return
+      }
+      callback(new Error(`CORS 拒绝来源：${origin}`))
+    },
+    credentials: true,
+  })
+  app.useGlobalFilters(new AllExceptionsFilter())
+
   const port = config.get<number>('port') ?? 3000
   await app.listen(port)
 

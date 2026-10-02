@@ -57,6 +57,18 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '生成监控' },
       },
       {
+        path: 'regression',
+        name: 'regression',
+        component: () => import('@/views/Regression.vue'),
+        meta: { title: '人工回归' },
+      },
+      {
+        path: 'sandbox',
+        name: 'sandbox',
+        component: () => import('@/views/Sandbox.vue'),
+        meta: { title: '沙箱预览' },
+      },
+      {
         path: 'trace',
         name: 'trace',
         component: () => import('@/views/Trace.vue'),

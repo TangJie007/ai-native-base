@@ -13,11 +13,11 @@ import type { AppConfiguration } from '../../config/configuration'
 import { LlmService } from '../../infra/llm/llm.service'
 import { PrismaService } from '../../prisma/prisma.service'
 
-const DEV_SECRET = 'specforge-dev-secret-change-me'
-
 /**
  * 模型配置（PRD 10）：用户级保存 provider / baseUrl / 各档位模型，
- * 密钥加密落库、永不下发前端；保存后热切换到 LlmService，无需重启。
+ * 密钥加密落库、永不下发前端；保存后按用户热切换到 LlmService，无需重启。
+ *
+ * 配置严格按用户隔离：启动时恢复全部用户配置，任一用户改配置不影响他人。
  */
 @Injectable()
 export class SettingsService implements OnApplicationBootstrap {
@@ -29,19 +29,26 @@ export class SettingsService implements OnApplicationBootstrap {
     private readonly llm: LlmService,
   ) {}
 
-  /** 启动时恢复最近一次保存的模型配置 */
+  /** 启动时恢复全部用户已保存的模型配置 */
   async onApplicationBootstrap(): Promise<void> {
     try {
-      const row = await this.prisma.modelSettings.findFirst({ orderBy: { updatedAt: 'desc' } })
-      if (!row) return
-      const apiKey = row.apiKeyCipher ? (decryptSecret(row.apiKeyCipher, this.jwtSecret()) ?? '') : ''
-      this.llm.applySettings({
-        provider: row.provider,
-        baseUrl: row.baseUrl,
-        apiKey,
-        fallbackModel: row.fallbackModel,
-        tiers: this.normalizeTiers(row.tiers),
-      })
+      const rows = await this.prisma.modelSettings.findMany()
+      for (const row of rows) {
+        try {
+          const apiKey = row.apiKeyCipher ? (decryptSecret(row.apiKeyCipher, this.jwtSecret()) ?? '') : ''
+          this.llm.applySettings(row.userId, {
+            provider: row.provider,
+            baseUrl: row.baseUrl,
+            apiKey,
+            fallbackModel: row.fallbackModel,
+            tiers: this.normalizeTiers(row.tiers),
+          })
+        } catch (error) {
+          this.logger.warn(
+            `恢复用户 ${row.userId} 模型配置失败：${error instanceof Error ? error.message : String(error)}`,
+          )
+        }
+      }
     } catch (error) {
       this.logger.warn(`恢复模型配置失败：${error instanceof Error ? error.message : String(error)}`)
     }
@@ -52,11 +59,11 @@ export class SettingsService implements OnApplicationBootstrap {
     const cfg = this.config.get<AppConfiguration['llm']>('llm')
     if (!row) {
       return {
-        provider: this.llm.currentProviderName(),
+        provider: this.llm.currentProviderName(userId),
         baseUrl: cfg?.baseUrl ?? '',
         apiKey: null,
-        apiKeyConfigured: this.llm.isApiKeyConfigured(),
-        tiers: this.llm.currentTiers(),
+        apiKeyConfigured: this.llm.isApiKeyConfigured(userId),
+        tiers: this.llm.currentTiers(userId),
         fallbackModel: cfg?.fallbackModel ?? '',
       }
     }
@@ -65,7 +72,7 @@ export class SettingsService implements OnApplicationBootstrap {
       baseUrl: row.baseUrl,
       apiKey: null,
       apiKeyConfigured: Boolean(row.apiKeyCipher),
-      tiers: this.currentTiers(row.tiers),
+      tiers: this.currentTiers(row.tiers, userId),
       fallbackModel: row.fallbackModel,
     }
   }
@@ -74,11 +81,11 @@ export class SettingsService implements OnApplicationBootstrap {
     const current = await this.prisma.modelSettings.findUnique({ where: { userId } })
     const secret = this.jwtSecret()
 
-    const provider = dto.provider ?? current?.provider ?? this.llm.currentProviderName()
+    const provider = dto.provider ?? current?.provider ?? this.llm.currentProviderName(userId)
     const baseUrl = dto.baseUrl ?? current?.baseUrl ?? ''
     const fallbackModel = dto.fallbackModel ?? current?.fallbackModel ?? ''
 
-    const baseTiers = this.currentTiers(current?.tiers ?? null)
+    const baseTiers = this.currentTiers(current?.tiers ?? null, userId)
     const tiers = dto.tiers ? this.mergeTiers(baseTiers, dto.tiers) : baseTiers
 
     let apiKeyCipher = current?.apiKeyCipher ?? null
@@ -107,7 +114,7 @@ export class SettingsService implements OnApplicationBootstrap {
     })
 
     const apiKey = apiKeyCipher ? (decryptSecret(apiKeyCipher, secret) ?? '') : ''
-    this.llm.applySettings({
+    this.llm.applySettings(userId, {
       provider,
       baseUrl,
       apiKey,
@@ -117,9 +124,9 @@ export class SettingsService implements OnApplicationBootstrap {
     return this.get(userId)
   }
 
-  /** 设置页「测试连接」：直接用当前适配器做一次轻量调用 */
-  async test(_userId: string, model: string, prompt: string): Promise<{ ok: boolean; message: string }> {
-    return this.llm.testModel(model, prompt)
+  /** 设置页「测试连接」：直接用该用户当前适配器做一次轻量调用 */
+  async test(userId: string, model: string, prompt: string): Promise<{ ok: boolean; message: string }> {
+    return this.llm.testModel(userId, model, prompt)
   }
 
   private mergeTiers(
@@ -140,9 +147,9 @@ export class SettingsService implements OnApplicationBootstrap {
     return result
   }
 
-  /** 以当前运行时档位为骨架，覆盖库中保存的模型名，保证 stages 元数据最新 */
-  private currentTiers(value: unknown): ModelTierBinding[] {
-    const skeleton = this.llm.currentTiers()
+  /** 以该用户当前运行时档位为骨架，覆盖库中保存的模型名，保证 stages 元数据最新 */
+  private currentTiers(value: unknown, userId: string): ModelTierBinding[] {
+    const skeleton = this.llm.currentTiers(userId)
     const stored = toTierBindings(value)
     return skeleton.map((binding) => {
       const found = stored.find((item) => item.tier === binding.tier)
@@ -155,6 +162,6 @@ export class SettingsService implements OnApplicationBootstrap {
   }
 
   private jwtSecret(): string {
-    return this.config.get<string>('jwt.secret') ?? DEV_SECRET
+    return this.config.getOrThrow<string>('jwt.secret')
   }
 }

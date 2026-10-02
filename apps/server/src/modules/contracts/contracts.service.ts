@@ -47,6 +47,12 @@ export class ContractsService {
   async generate(userId: string, projectId: string): Promise<Contract> {
     const project = await this.projects.assertOwned(userId, projectId)
 
+    // 已锁定契约视为冻结：禁止再生成新版本，避免 S4 用的锁定版本与最新版本不一致（B-11）
+    const lockedExisting = await this.lockedContract(projectId)
+    if (lockedExisting) {
+      throw conflict(ErrorCode.CONTRACT_ALREADY_LOCKED, { projectId, contractId: lockedExisting.id })
+    }
+
     const gate = await this.assumptions.gate(projectId)
     if (!gate.allowed) throw conflict(ErrorCode.ASSUMPTIONS_PENDING, gate)
 
@@ -64,9 +70,9 @@ export class ContractsService {
     const items: RequirementItem[] = itemRows.map((row) => toRequirementItem(row as unknown as Row))
 
     const generated = await this.traces.track(
-      { projectId, action: 'S2 契约生成', inputSummary: `${items.length} 个条目` },
+      { projectId, action: 'S2 契约生成', inputSummary: `${items.length} 个条目`, agent: 'contract' },
       () =>
-        this.llm.generateContract({
+        this.llm.generateContract(userId, {
           spec,
           items,
           stackConfig: project.stackConfig as StackConfig,

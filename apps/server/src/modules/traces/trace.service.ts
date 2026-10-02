@@ -59,7 +59,14 @@ export class TraceService {
 
   /** 包裹一次模型调用：自动计时、记录成功/失败并推送 */
   async track<T>(
-    meta: { projectId: string; itemId?: string | null; action: string; inputSummary?: string },
+    meta: {
+      projectId: string
+      itemId?: string | null
+      action: string
+      inputSummary?: string
+      /** 预期 Agent 角色，仅用于失败兜底记录，避免失败全被记为 parser（B-8） */
+      agent?: AgentName
+    },
     call: () => Promise<TrackedCall<T>>,
   ): Promise<T> {
     const startedAt = Date.now()
@@ -82,7 +89,7 @@ export class TraceService {
       await this.record({
         projectId: meta.projectId,
         itemId: meta.itemId,
-        agent: 'parser',
+        agent: meta.agent ?? 'parser',
         model: 'unknown',
         action: meta.action,
         inputSummary: meta.inputSummary,

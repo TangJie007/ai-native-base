@@ -25,9 +25,15 @@ function handleTabChange(name: string | number) {
   switchMode(name as 'login' | 'register')
 }
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
 async function submit() {
   if (!form.email || !form.password) {
     ElMessage.warning('请填写邮箱与密码')
+    return
+  }
+  if (!EMAIL_RE.test(form.email)) {
+    ElMessage.warning('请输入有效的邮箱地址')
     return
   }
   if (mode.value === 'register' && form.password.length < 6) {

@@ -69,6 +69,15 @@ export interface GeneratedFix {
   files: GeneratedFile[]
 }
 
+/** 单次修复尝试的历史记录，供下一轮修复参考，避免重复无效改动（PRD 7.2） */
+export interface FixAttempt {
+  round: number
+  checkType: string
+  message: string
+  output: string
+  patch: string
+}
+
 /**
  * 模型适配器接口。默认 MockLlmProvider（确定性算法，零外部依赖）；
  * 配置 LLM_PROVIDER=openai + API Key 后切换为 OpenAiCompatibleProvider。
@@ -112,6 +121,8 @@ export interface LlmProvider {
     error: ErrorSnapshot
     files: GeneratedFile[]
     round: number
+    /** 之前各轮修复尝试，避免重复无效方案 */
+    history: FixAttempt[]
   }): Promise<{ result: GeneratedFix; usage: LlmUsage }>
 }
 

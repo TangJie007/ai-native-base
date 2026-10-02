@@ -183,21 +183,46 @@ function rowClassName({ row }: { row: RequirementItem }) {
 
 /* ---------------- WebSocket 实时推送 ---------------- */
 
-// 过滤非当前项目的事件（payload 携带 projectId 时才校验）
+// 过滤非当前项目的事件（房间订阅已隔离，此处防御性再校验一次）
 function sameProject(pid?: string | null) {
   return !pid || pid === projectId.value
 }
 
+// 订阅当前项目房间（服务端会校验项目归属）
+function subscribe() {
+  if (socket && projectId.value) socket.emit('subscribe', { projectId: projectId.value })
+}
+
+function applySandboxFiles(files: SandboxFile[]) {
+  if (sandbox.value) sandbox.value = { ...sandbox.value, files }
+  else
+    sandbox.value = {
+      sandboxId: null,
+      status: 'ready',
+      provider: 'mock',
+      files,
+      previewUrl: null,
+      updatedAt: null,
+    }
+}
+
 function connectSocket() {
-  socket = io('http://localhost:3000/ws', {
+  // 使用相对路径，经 Vite 代理 /socket.io 到后端，避免硬编码后端地址
+  socket = io('/ws', {
     auth: { token: localStorage.getItem(TOKEN_KEY) || '' },
   })
 
   socket.on('connect', () => {
     connected.value = true
+    subscribe()
   })
   socket.on('disconnect', () => {
     connected.value = false
+  })
+  // 断线重连后重新订阅并拉取最新状态，补齐断连期间丢失的事件
+  socket.on('reconnect', () => {
+    subscribe()
+    void load()
   })
 
   socket.on('pipeline:status', (payload: PipelineStatus) => {
@@ -217,10 +242,9 @@ function connectSocket() {
     liveTraces.value = [payload, ...liveTraces.value].slice(0, 8)
   })
 
-  socket.on('sandbox:files', (payload: SandboxFile[]) => {
-    if (!Array.isArray(payload)) return
-    if (sandbox.value) sandbox.value = { ...sandbox.value, files: payload }
-    else sandbox.value = { sandboxId: null, status: 'ready', provider: 'mock', files: payload, previewUrl: null, updatedAt: null }
+  socket.on('sandbox:files', (payload: { projectId: string; files: SandboxFile[] }) => {
+    if (!payload || !sameProject(payload.projectId) || !Array.isArray(payload.files)) return
+    applySandboxFiles(payload.files)
   })
 }
 
@@ -239,6 +263,7 @@ onUnmounted(() => {
 watch(projectId, (id) => {
   if (!id) return
   if (!socket) connectSocket()
+  subscribe()
   load()
 })
 </script>

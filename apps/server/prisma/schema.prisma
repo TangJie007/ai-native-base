@@ -129,7 +129,8 @@ model RequirementItem {
   fixes        FixRecord[]
   regression   RegressionItem[]
 
-  @@index([projectId])
+  // 项目内条目 code 由 uniqueCode() 保证唯一，落库层再加约束防并发重复（D-10）
+  @@unique([projectId, code])
   @@map("requirement_items")
 }
 
@@ -155,7 +156,8 @@ model Contract {
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
-  @@index([projectId])
+  // 项目内契约版本单调递增，落库层约束防并发重复（D-10）
+  @@unique([projectId, version])
   @@map("contracts")
 }
 

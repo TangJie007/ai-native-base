@@ -21,6 +21,7 @@ interface VectorRow {
   owner_id: string
   project_id: string | null
   text: string
+  dim: number
   vector: Buffer
 }
 
@@ -41,14 +42,19 @@ export interface VectorHit {
 export class VectorService implements OnModuleDestroy {
   private readonly logger = new Logger(VectorService.name)
   private db: SqliteDatabase | null = null
-  private initialized = false
+  private attempted = false
+  private failedAt = 0
   private readonly dim = 64
+  /** 初始化失败后的重试间隔，避免高频重试与日志刷屏 */
+  private static readonly RETRY_INTERVAL_MS = 30_000
 
   constructor(private readonly config: ConfigService) {}
 
   private database(): SqliteDatabase | null {
-    if (this.initialized) return this.db
-    this.initialized = true
+    if (this.db) return this.db
+    // 失败后进入冷却期，冷却结束允许再次尝试（D-8）
+    if (this.attempted && Date.now() - this.failedAt < VectorService.RETRY_INTERVAL_MS) return null
+    this.attempted = true
     try {
       const require = createRequire(__filename)
       const sqlite = require('node:sqlite') as { DatabaseSync: new (path: string) => SqliteDatabase }
@@ -74,8 +80,11 @@ export class VectorService implements OnModuleDestroy {
       this.logger.log(`向量库已就绪：${dbPath}`)
     } catch (error) {
       this.db = null
+      this.failedAt = Date.now()
       this.logger.warn(
-        `向量库初始化失败（不影响主流程）：${error instanceof Error ? error.message : String(error)}`,
+        `向量库初始化失败（不影响主流程，${VectorService.RETRY_INTERVAL_MS / 1000}s 后重试）：${
+          error instanceof Error ? error.message : String(error)
+        }`,
       )
     }
     return this.db
@@ -110,6 +119,13 @@ export class VectorService implements OnModuleDestroy {
     db.prepare('DELETE FROM vector_embeddings WHERE owner_type = ? AND owner_id = ?').run(ownerType, ownerId)
   }
 
+  /** 删除项目下全部向量，项目删除时调用，避免残留脏召回（B-12） */
+  removeByProject(projectId: string): void {
+    const db = this.database()
+    if (!db) return
+    db.prepare('DELETE FROM vector_embeddings WHERE project_id = ?').run(projectId)
+  }
+
   search(
     query: string,
     options: { projectId?: string; ownerType?: string; limit?: number } = {},
@@ -128,21 +144,25 @@ export class VectorService implements OnModuleDestroy {
       params.push(options.ownerType)
     }
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
-    const rows = db.prepare(`SELECT owner_type, owner_id, project_id, text, vector FROM vector_embeddings ${where}`).all(
-      ...params,
-    ) as VectorRow[]
+    const rows = db
+      .prepare(`SELECT owner_type, owner_id, project_id, text, dim, vector FROM vector_embeddings ${where}`)
+      .all(...params) as VectorRow[]
 
     const queryVector = pseudoEmbedding(query, this.dim)
-    return rows
-      .map((row) => ({
+    const hits: VectorHit[] = []
+    for (const row of rows) {
+      // 维度不一致或 BLOB 长度不足时跳过，避免读到脏数据（D-7）
+      if (row.dim !== this.dim || row.vector.byteLength < row.dim * 8) continue
+      const stored = new Float64Array(row.vector.buffer, row.vector.byteOffset, row.dim)
+      hits.push({
         ownerType: row.owner_type,
         ownerId: row.owner_id,
         projectId: row.project_id,
         text: row.text,
-        score: this.cosine(queryVector, new Float64Array(row.vector.buffer, row.vector.byteOffset, this.dim)),
-      }))
-      .sort((a, b) => b.score - a.score)
-      .slice(0, limit)
+        score: this.cosine(queryVector, stored),
+      })
+    }
+    return hits.sort((a, b) => b.score - a.score).slice(0, limit)
   }
 
   onModuleDestroy(): void {
@@ -150,9 +170,18 @@ export class VectorService implements OnModuleDestroy {
     this.db = null
   }
 
-  private cosine(a: number[] | Float64Array, b: Float64Array): number {
+  /** 标准余弦相似度：点积 / (模长乘积)，任一向量为零向量时返回 0（D-7） */
+  private cosine(a: ArrayLike<number>, b: ArrayLike<number>): number {
+    const len = Math.min(a.length, b.length)
     let dot = 0
-    for (let i = 0; i < this.dim; i += 1) dot += a[i] * b[i]
-    return Number(dot.toFixed(4))
+    let normA = 0
+    let normB = 0
+    for (let i = 0; i < len; i += 1) {
+      dot += a[i] * b[i]
+      normA += a[i] * a[i]
+      normB += b[i] * b[i]
+    }
+    if (normA === 0 || normB === 0) return 0
+    return Number((dot / (Math.sqrt(normA) * Math.sqrt(normB))).toFixed(4))
   }
 }

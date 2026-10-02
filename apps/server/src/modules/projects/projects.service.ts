@@ -16,17 +16,23 @@ import {
   type StackConfig,
   type UpdateProjectDto,
 } from '@specforge/shared'
-import { forbidden, notFound } from '../../common/app-exception'
+import { conflict, forbidden, notFound } from '../../common/app-exception'
 import type { Row } from '../../common/mappers'
 import { toProject } from '../../common/mappers'
 import { estimateCost, formatCost, formatDuration, passRate } from '../../common/metrics.util'
+import { SandboxService } from '../../infra/sandbox/sandbox.service'
+import { VectorService } from '../../infra/vector/vector.service'
 import { PrismaService } from '../../prisma/prisma.service'
 
 const FINISHED_STATUSES: ItemStatus[] = ['passed', 'failed', 'needs_human']
 
 @Injectable()
 export class ProjectsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly sandbox: SandboxService,
+    private readonly vectors: VectorService,
+  ) {}
 
   /** 项目归属校验：所有子资源接口统一入口，避免越权访问他人项目 */
   async assertOwned(userId: string, projectId: string): Promise<Row> {
@@ -86,7 +92,14 @@ export class ProjectsService {
   }
 
   async remove(userId: string, projectId: string): Promise<void> {
-    await this.assertOwned(userId, projectId)
+    const project = await this.assertOwned(userId, projectId)
+    // 流水线执行中禁止删除，避免与生成/校验/沙箱写入竞态（B-12）
+    if (project.status === 'generating') {
+      throw conflict(ErrorCode.PIPELINE_ALREADY_RUNNING, { projectId })
+    }
+    // 先释放外部资源（沙箱容器、向量索引），再删除数据库记录
+    await this.sandbox.destroy(projectId)
+    this.vectors.removeByProject(projectId)
     await this.prisma.project.delete({ where: { id: projectId } })
   }
 

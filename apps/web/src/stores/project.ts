@@ -35,6 +35,10 @@ export const useProjectStore = defineStore('project', () => {
       current.value = project
       setCurrentId(project.id)
       return project
+    } catch {
+      // 加载失败（含 401，拦截器已提示/跳转）时清空详情，避免遗留脏数据向上抛
+      current.value = null
+      return null
     } finally {
       loading.value = false
     }

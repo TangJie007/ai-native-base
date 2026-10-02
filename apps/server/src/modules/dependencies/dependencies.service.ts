@@ -89,8 +89,8 @@ export class DependenciesService {
 
     const items = itemRows.map((row) => toRequirementItem(row as unknown as Row))
     const generated = await this.traces.track(
-      { projectId, action: 'S3 依赖分析', inputSummary: `${items.length} 个条目` },
-      () => this.llm.analyzeDependencies({ items, contract }),
+      { projectId, action: 'S3 依赖分析', inputSummary: `${items.length} 个条目`, agent: 'architect' },
+      () => this.llm.analyzeDependencies(userId, { items, contract }),
     )
 
     const byCode = new Map(items.map((item) => [item.code, item]))
@@ -158,9 +158,10 @@ export class DependenciesService {
     const count = await this.prisma.requirementItem.count({ where: { projectId } })
     if (count === 0) throw conflict(ErrorCode.NO_REQUIREMENT_ITEMS, { projectId })
 
+    // 确认依赖只解锁 S4，不提前置 generating：真正开跑由 pipeline.start 负责（B-10）
     await this.prisma.project.update({
       where: { id: projectId },
-      data: { depsConfirmed: true, status: 'generating', currentStage: 'S4' },
+      data: { depsConfirmed: true, currentStage: 'S4' },
     })
     return this.get(projectId)
   }
