@@ -65,6 +65,10 @@ export class RequirementsService {
     dto: ImportRequirementDocDto,
   ): Promise<ImportRequirementsResult> {
     const project = await this.projects.assertOwned(userId, projectId)
+    // 流水线执行中禁止重导入：整体替换会级联删除正在被生成/校验的条目，导致状态错乱（B-14）
+    if (project.status === 'generating') {
+      throw conflict(ErrorCode.PIPELINE_ALREADY_RUNNING, { projectId })
+    }
     const stackConfig = project.stackConfig as StackConfig
 
     const parsed = await this.traces.track(

@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus'
 import { Connection, Key, Setting as SettingIcon } from '@element-plus/icons-vue'
 import type { ModelTierBinding } from '@specforge/shared'
 import { MODEL_TIER_META } from '@specforge/shared'
+import { metaOf } from '@/utils/meta'
 import { getModelSettings, testModel, updateModelSettings } from '@/api/settings'
 import EmptyState from '@/components/EmptyState.vue'
 
@@ -39,9 +40,14 @@ async function load() {
 }
 
 async function save() {
+  // Provider 为必填：留空会命中后端 min(1) 校验并返回 400
+  if (!form.provider.trim()) {
+    ElMessage.warning('请填写 Provider')
+    return
+  }
   const emptyTier = tiers.value.find((t) => !t.model.trim())
   if (emptyTier) {
-    ElMessage.warning(`请填写「${MODEL_TIER_META[emptyTier.tier].label}」档位的模型名`)
+    ElMessage.warning(`请填写「${metaOf(MODEL_TIER_META, emptyTier.tier).label}」档位的模型名`)
     return
   }
   saving.value = true
@@ -148,12 +154,12 @@ onMounted(load)
               effect="dark"
               round
             >
-              {{ MODEL_TIER_META[t.tier].label }}
+              {{ metaOf(MODEL_TIER_META, t.tier).label }}
             </el-tag>
           </div>
           <div class="flex flex-1 flex-wrap gap-1.5">
             <span
-              v-for="stage in MODEL_TIER_META[t.tier].stages"
+              v-for="stage in metaOf(MODEL_TIER_META, t.tier).stages"
               :key="stage"
               class="rounded-full bg-shell px-2.5 py-1 text-[11px] text-txt-mute"
             >

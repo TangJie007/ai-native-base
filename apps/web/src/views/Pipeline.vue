@@ -534,7 +534,7 @@ watch(projectId, (id) => {
           class="rounded-2xl bg-[#161821] p-4 text-[12px] text-[#D6DAE3]"
         >
           <div class="mb-1 text-[11px] text-[#8D8D99]">
-            {{ VERIFICATION_CHECK_META[resolveTarget.errorSnapshot.checkType].label }} ·
+            {{ metaOf(VERIFICATION_CHECK_META, resolveTarget.errorSnapshot.checkType).label }} ·
             第 {{ resolveTarget.errorSnapshot.round }} 轮
           </div>
           <pre class="code-block whitespace-pre-wrap">{{ resolveTarget.errorSnapshot.output || resolveTarget.errorSnapshot.message }}</pre>

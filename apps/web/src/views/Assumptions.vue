@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus'
 import { ArrowRight, CircleCheckFilled, Edit, WarningFilled } from '@element-plus/icons-vue'
 import type { Assumption, AssumptionsGate } from '@specforge/shared'
 import { ASSUMPTION_CATEGORY_META, ASSUMPTION_STATUS_META } from '@specforge/shared'
+import { metaOf } from '@/utils/meta'
 import {
   confirmAllAssumptions,
   getAssumptionsGate,
@@ -201,8 +202,8 @@ watch(projectId, load, { immediate: true })
           <div class="flex items-start gap-4">
             <div class="flex-1">
               <div class="mb-2 flex items-center gap-2">
-                <StatusTag :meta="ASSUMPTION_CATEGORY_META[a.category]" :effect="'dark'" />
-                <StatusTag :meta="ASSUMPTION_STATUS_META[a.status]" />
+                <StatusTag :meta="metaOf(ASSUMPTION_CATEGORY_META, a.category)" :effect="'dark'" />
+                <StatusTag :meta="metaOf(ASSUMPTION_STATUS_META, a.status)" />
                 <span class="text-[11px] text-txt-faint">{{ a.code }}</span>
               </div>
               <div class="text-[14px] font-medium leading-relaxed text-txt-primary">{{ a.question }}</div>

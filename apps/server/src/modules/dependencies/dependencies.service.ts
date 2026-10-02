@@ -106,6 +106,18 @@ export class DependenciesService {
       data.push({ projectId, itemId: item.id, dependsOnId: dependsOn.id, depType: dep.depType })
     }
 
+    // 拒绝带环依赖图：LLM 产出的边同样可能成环，环会让 S4 批次分层退化为强制放行（PRD 3.3 PLAN-06）
+    const { cycleRemoved } = buildBatches(
+      itemRows.map((row) => ({
+        id: row.id,
+        code: row.code,
+        title: row.title,
+        layer: row.layer as RequirementItem['layer'],
+      })),
+      data.map((edge) => ({ itemId: edge.itemId, dependsOnId: edge.dependsOnId })),
+    )
+    if (cycleRemoved > 0) throw badRequest(ErrorCode.CYCLE_DETECTED, { cycleNodes: cycleRemoved })
+
     // 边集整体替换需原子完成，避免删除成功但重建失败导致依赖图丢失（M5）
     await this.prisma.$transaction(async (tx) => {
       await tx.itemDependency.deleteMany({ where: { projectId } })

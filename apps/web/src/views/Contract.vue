@@ -149,7 +149,7 @@ watch(projectId, load, { immediate: true })
             <el-tab-pane v-for="t in codeTabs" :key="t.name" :label="t.label" :name="t.name" />
           </el-tabs>
           <div class="flex gap-2">
-            <el-button round :loading="generating" @click="generate">
+            <el-button round :loading="generating" :disabled="contract.locked" @click="generate">
               <el-icon class="mr-1"><RefreshRight /></el-icon>重新生成
             </el-button>
             <el-button v-if="!contract.locked" type="primary" round :loading="locking" @click="lock">

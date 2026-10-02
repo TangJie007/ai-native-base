@@ -87,7 +87,8 @@ async function toggle(entry: RegressionItem, checked: boolean) {
       text: entry.text,
       checked,
     })
-    entry.checked = checked
+    // 以服务端返回的清单回填：条目可能被重建/去重，避免本地与服务端漂移
+    checklist.value = updated.regressionChecklist
     pipeline.value = updated
     if (checked && updated.regressionChecklist.every((c) => c.checked)) {
       ElMessage.success('全部回归项已确认，项目已交付')

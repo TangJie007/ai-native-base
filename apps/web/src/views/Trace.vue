@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ArrowDown, ArrowUp } from '@element-plus/icons-vue'
 import type { AgentName, TracesPayload } from '@specforge/shared'
 import { AGENT_META } from '@specforge/shared'
+import { metaOf } from '@/utils/meta'
 import { listTraces } from '@/api/traces'
 import { useProjectStore } from '@/stores/project'
 import StatCard from '@/components/StatCard.vue'
@@ -125,7 +126,7 @@ watch(projectId, load, { immediate: true })
                   class="rounded-full px-3 py-1 text-[12px] font-medium"
                   :class="agentStyle[t.agentName] || 'bg-ink text-white'"
                 >
-                  {{ AGENT_META[t.agentName].label }}
+                  {{ metaOf(AGENT_META, t.agentName).label }}
                 </span>
                 <el-tag size="small" effect="plain" round>{{ t.model }}</el-tag>
                 <span class="flex-1 truncate text-[13.5px] text-txt-primary">{{ t.action }}</span>

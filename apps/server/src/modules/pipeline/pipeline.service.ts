@@ -25,7 +25,7 @@ import {
   type VerificationCheckType,
   type VerificationRun,
 } from '@specforge/shared'
-import { conflict } from '../../common/app-exception'
+import { conflict, notFound } from '../../common/app-exception'
 import {
   toFixRecord,
   toRegressionItem,
@@ -213,6 +213,9 @@ export class PipelineService implements OnModuleInit {
     }
 
     if (dto.action === 'retry') {
+      // 依赖未通过时不得重跑：否则会产出依赖缺失的不可用代码（与 runAll 的 B-9 门禁同一口径）
+      const unmet = await this.countUnmetDependencies(itemId)
+      if (unmet > 0) throw conflict(ErrorCode.DEPENDENCIES_NOT_PASSED, { itemId, unmet })
       const updated = await this.updateItem(itemId, {
         status: 'pending',
         retryCount: 0,
@@ -243,8 +246,14 @@ export class PipelineService implements OnModuleInit {
     // 流水线运行期间回归清单仍在重建，禁止勾选，避免误判全部通过而提前交付
     if (this.active.has(projectId)) throw conflict(ErrorCode.PIPELINE_ALREADY_RUNNING, { projectId })
 
-    await this.prisma.regressionItem.updateMany({
+    // 先确认回归项存在再更新：updateMany 在值未变化时可能返回 0 命中，不能据此判断合法性
+    const target = await this.prisma.regressionItem.findFirst({
       where: { projectId, itemId: dto.itemId, text: dto.text },
+      select: { id: true },
+    })
+    if (!target) throw notFound(ErrorCode.NOT_FOUND, { itemId: dto.itemId, text: dto.text })
+    await this.prisma.regressionItem.update({
+      where: { id: target.id },
       data: { checked: dto.checked },
     })
 
@@ -253,6 +262,12 @@ export class PipelineService implements OnModuleInit {
       this.prisma.regressionItem.count({ where: { projectId, checked: false } }),
     ])
     if (total > 0 && unchecked === 0) {
+      // 回归清单只覆盖 passed/failed/needs_human，blocked/pending 等条目不在清单内，
+      // 若不校验会出现「清单勾满但仍有未完成条目」的假交付（PRD 3.4 VER-08）
+      const unsettled = await this.prisma.requirementItem.count({
+        where: { projectId, status: { notIn: ['passed', 'failed', 'needs_human'] } },
+      })
+      if (unsettled > 0) throw conflict(ErrorCode.ITEMS_NOT_SETTLED, { projectId, unsettled })
       await this.prisma.project.update({
         where: { id: projectId },
         data: { status: 'delivered', currentStage: 'S5' },
@@ -485,6 +500,12 @@ export class PipelineService implements OnModuleInit {
       ])
       if (!project || !item) return
 
+      // 依赖门禁兜底（覆盖唤醒队列等非人工入口）：前置未通过则不执行，保持 blocked
+      if ((await this.countUnmetDependencies(itemId)) > 0) {
+        await this.updateItem(itemId, { status: 'blocked' })
+        return
+      }
+
       const contract = await this.contracts.lockedContract(projectId)
       const run = await this.prisma.pipelineRun.findFirst({
         where: { projectId },
@@ -689,11 +710,16 @@ export class PipelineService implements OnModuleInit {
     const checkedMap = new Map(existing.map((row) => [`${row.itemId}|${row.text}`, row.checked]))
 
     const data: { projectId: string; itemId: string; text: string; checked: boolean }[] = []
+    // 验收标准可能含重复文本，去重避免同一检查项重复出现导致勾选永远凑不齐（VER-08）
+    const seen = new Set<string>()
     for (const item of items) {
       const acceptance = (item.acceptance as string[] | null) ?? []
       const checks = acceptance.length > 0 ? acceptance : [`${item.title} 功能正常`]
       for (const text of checks) {
-        data.push({ projectId, itemId: item.id, text, checked: checkedMap.get(`${item.id}|${text}`) ?? false })
+        const key = `${item.id}|${text}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        data.push({ projectId, itemId: item.id, text, checked: checkedMap.get(key) ?? false })
       }
     }
 
@@ -701,6 +727,18 @@ export class PipelineService implements OnModuleInit {
     await this.prisma.$transaction(async (tx) => {
       await tx.regressionItem.deleteMany({ where: { projectId } })
       if (data.length > 0) await tx.regressionItem.createMany({ data })
+    })
+  }
+
+  /** 统计某条目尚未通过的前置依赖数量（runAll 与人工重跑统一口径） */
+  private async countUnmetDependencies(itemId: string): Promise<number> {
+    const deps = await this.prisma.itemDependency.findMany({
+      where: { itemId },
+      select: { dependsOnId: true },
+    })
+    if (deps.length === 0) return 0
+    return this.prisma.requirementItem.count({
+      where: { id: { in: deps.map((dep) => dep.dependsOnId) }, status: { not: 'passed' } },
     })
   }
 

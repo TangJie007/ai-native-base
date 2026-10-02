@@ -23,17 +23,15 @@ export class AssumptionsService {
       this.prisma.assumption.count({ where: { projectId, status: { in: ['confirmed', 'default'] } } }),
     ])
     const pending = total - resolved
-    const allowed = total > 0 && pending === 0
+    // 无假设（total === 0）也应放行：否则 LLM 未产出假设时门禁永久阻塞，
+    // 条目与文档的缺失由下游 contracts.generate / pipeline.start 各自兜底（NO_REQUIREMENT_ITEMS / NO_REQUIREMENT_DOC）
+    const allowed = pending === 0
     return {
       allowed,
       total,
       resolved,
       pending,
-      blockedReason: allowed
-        ? null
-        : total === 0
-          ? '尚未导入需求文档，没有可确认的假设。'
-          : `还有 ${pending} 条假设待确认。`,
+      blockedReason: allowed ? null : `还有 ${pending} 条假设待确认。`,
     }
   }
 
@@ -42,7 +40,9 @@ export class AssumptionsService {
     if (!current) throw notFound(ErrorCode.NOT_FOUND, { assumptionId })
 
     const hasAnswer = dto.userAnswer !== undefined && dto.userAnswer !== null && dto.userAnswer !== ''
-    const status = dto.status ?? (hasAnswer ? 'confirmed' : undefined)
+    // 清空回答须回退到 pending，否则「空答案的已确认项」会绕过卡点一（PRD 6.1）
+    const status =
+      dto.status ?? (dto.userAnswer === undefined ? undefined : hasAnswer ? 'confirmed' : 'pending')
 
     const row = await this.prisma.assumption.update({
       where: { id: assumptionId },
