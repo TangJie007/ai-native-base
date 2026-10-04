@@ -1,0 +1,75 @@
+name: add-sms-login
+path: architectural
+created: 2026-10-04T09:00:00+08:00
+status: archived
+author: spec-craft-example
+
+description: >
+  新增手机号验证码登录功能：支持发送验证码 + 验证码登录两种能力，
+  允许用户不用记忆密码即可登录。
+
+# 外部 PRD 输入登记
+prd_inputs:
+  - path: PRD.md
+    locate: "§3.1 手机号验证码登录"
+    sha256: ""
+
+# 影响的 atom 列表
+atoms:
+  - domain: auth
+    atom: sms-send
+    operation: ADDED
+    delta: delta/auth/sms-send.md
+    tasks: tasks/auth/sms-send.md
+    target: specs/atom/auth/sms-send.md
+
+  - domain: auth
+    atom: sms-login
+    operation: ADDED
+    delta: delta/auth/sms-login.md
+    tasks: tasks/auth/sms-login.md
+    target: specs/atom/auth/sms-login.md
+
+# 任务状态（归档时全部完成）
+tasks:
+  confirmed: true
+  complete: true
+  confirmed_at: 2026-10-04T11:00:00+08:00
+  completed_at: 2026-10-05T10:00:00+08:00
+
+# 设计（design）
+design:
+  skipped: false
+  skip_reason: null
+  approved_at: 2026-10-04T10:30:00+08:00
+
+# 待确认项（已全部回答）
+open_questions:
+  - id: Q1
+    question: 是否支持国际手机号？
+    asked_at: 2026-10-04T09:30:00+08:00
+    answered: true
+    answer: 本版本只做中国大陆（+86），国际手机号下版本支持
+
+  - id: Q2
+    question: 用户已注册邮箱账号后，能否绑定手机号？
+    asked_at: 2026-10-04T09:30:00+08:00
+    answered: true
+    answer: 本版本不支持绑定，作为独立账号处理；绑定能力下版本
+
+  - id: Q3
+    question: 短信服务商选型？
+    asked_at: 2026-10-04T09:30:00+08:00
+    answered: true
+    answer: 用阿里云短信，通过抽象接口便于替换
+
+# 归档信息
+archive:
+  at: 2026-10-05T10:00:00+08:00
+  commit: a1b2c3d
+  reviewer: agent
+
+# 评审模式
+review:
+  mode: thorough
+  last_reviewer: agent

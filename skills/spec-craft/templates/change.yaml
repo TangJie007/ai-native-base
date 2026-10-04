@@ -1,0 +1,55 @@
+# change.yaml - 变更记录骨架
+# 复制到 specs/changes/{name}/change.yaml 后填写
+
+name: <change-name>                     # kebab-case，如 add-sms-login
+path: architectural                     # spike | bounded | architectural（单向，只升不降）
+created: 2026-10-04T00:00:00+08:00      # ISO 日期
+status: proposed                        # proposed | designing | implementing | review | archived | abandoned
+author: <user-or-agent-name>
+
+description: >
+  一句话概括本 change 要做什么。
+
+# 外部 PRD 输入登记
+prd_inputs:
+  - path: PRD.md                        # 仓库相对路径或 URL
+    locate: "§3.1"                      # 定位到具体章节（可选，如标题/行号/锚点）
+    sha256: ""                          # 可选：PRD 内容 hash，用于检测 PRD 是否被修改
+
+# 影响的 atom 列表
+atoms:
+  - domain: auth                        # 领域，如 auth / billing / user
+    atom: sms-login                     # atom 名，与 specs/atom/{domain}/{atom}.md 对应
+    operation: ADDED                    # ADDED | MODIFIED | REMOVED
+    delta: delta/auth/sms-login.md      # 相对 change 目录的 delta 路径
+    tasks: tasks/auth/sms-login.md      # 相对 change 目录的 tasks 路径
+    target: specs/atom/auth/sms-login.md # 仓库相对路径的真相源
+
+# 任务状态（门禁）
+tasks:
+  confirmed: false                      # 用户确认 tasks 后置为 true
+  complete: false                       # 所有 task 勾选后置为 true
+  confirmed_at: null                    # ISO 日期
+  completed_at: null
+
+# 设计（design）
+design:
+  skipped: false                        # Bounded 小改动可跳过 design
+  skip_reason: null
+  approved_at: null
+
+# 待确认项（不阻塞，但归档前应清空）
+open_questions: []
+# 示例：
+# open_questions:
+#   - id: Q1
+#     question: 手机号是否需要全球支持？
+#     asked_at: 2026-10-04
+#     answered: false
+#     answer: null
+
+# 归档信息（archive 阶段填写）
+archive:
+  at: null
+  commit: null
+  reviewer: null
